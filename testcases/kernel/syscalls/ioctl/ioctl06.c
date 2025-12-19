@@ -2,7 +2,8 @@
 /*
  * Copyright (c) 2017 Cyril Hrubis <chrubis@suse.cz>
  */
-/*
+
+/*\
  * Basic test for the BLKRASET and BLKRAGET ioctls.
  *
  * Sets device read-ahead, reads it back and compares the values.

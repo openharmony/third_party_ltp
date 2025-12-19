@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017 RedHat.  All Rights Reserved.
  *
@@ -6,7 +6,6 @@
  */
 
 /*\
- * [Description]
  * Sanity check fanotify_init flag FAN_CLOEXEC by fcntl.
  */
 

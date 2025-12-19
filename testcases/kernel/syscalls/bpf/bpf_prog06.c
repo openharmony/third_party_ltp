@@ -4,8 +4,6 @@
  */
 
 /*\
- * [Description]
- *
  * ringbuf_submit takes a pointer to a ringbuf record, but not the
  * size of this record. The verifier only validates offset ptrs[1] passed
  * to functions if the function has a size parameter. So we can
@@ -131,6 +129,7 @@ static void run(void)
 }
 
 static struct tst_test test = {
+	.timeout = 20,
 	.setup = setup,
 	.test_all = run,
 	.min_kver = "5.8",

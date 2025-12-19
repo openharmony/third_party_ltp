@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * This code tests if STATX_ATTR_VERITY flag in the statx attributes is set correctly.
  *
  * The statx() system call sets STATX_ATTR_VERITY if the file has fs-verity
@@ -156,7 +154,10 @@ static struct tst_test test = {
 	.needs_root = 1,
 	.needs_device = 1,
 	.mntpoint = MNTPOINT,
-	.dev_fs_type = "ext4",
+	.filesystems = (struct tst_fs []) {
+		{.type = "ext4"},
+		{}
+	},
 	.needs_kconfigs = (const char *[]) {
 		"CONFIG_FS_VERITY",
 		NULL

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2022 CM4all GmbH / IONOS SE
  *
@@ -8,8 +8,6 @@
  */
 
 /*\
- * [Description]
- *
  * Proof-of-concept exploit for the Dirty Pipe
  * vulnerability (CVE-2022-0847) caused by an uninitialized
  * "pipe_buffer.flags" variable.  It demonstrates how to overwrite any

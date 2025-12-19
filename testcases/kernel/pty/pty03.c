@@ -4,8 +4,6 @@
  */
 
 /*\
- * [Description]
- *
  * Test based on Syzkaller reproducer:
  * https://syzkaller.appspot.com/bug?id=680c24ff647dd7241998e19da52e8136d2fd3523
  *
@@ -152,7 +150,8 @@ static struct tst_test test = {
 	.setup = setup,
 	.cleanup = cleanup,
 	.needs_root = 1,
-	.max_runtime = 30,
+	.runtime = 30,
+	.min_runtime = 16,
 	.needs_kconfigs = (const char *const[]){
 		"CONFIG_SERIO_SERPORT",
 		NULL

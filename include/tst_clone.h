@@ -5,11 +5,14 @@
 #ifndef TST_CLONE_H__
 #define TST_CLONE_H__
 
+#include <sched.h>
+
 #ifdef TST_TEST_H__
 
 /* The parts of clone3's clone_args we support */
 struct tst_clone_args {
 	uint64_t flags;
+	uint64_t pidfd;
 	uint64_t exit_signal;
 	uint64_t cgroup;
 };
@@ -39,10 +42,6 @@ int ltp_clone(unsigned long flags, int (*fn)(void *arg), void *arg,
 		size_t stack_size, void *stack);
 int ltp_clone7(unsigned long flags, int (*fn)(void *arg), void *arg,
 		size_t stack_size, void *stack, ...);
-int ltp_clone_alloc(unsigned long clone_flags, int (*fn)(void *arg),
-		void *arg, size_t stacksize);
-int ltp_clone_quick(unsigned long clone_flags, int (*fn)(void *arg),
-		void *arg);
 void *ltp_alloc_stack(size_t size);
 
 #define clone(...) (use_the_ltp_clone_functions__do_not_use_clone)

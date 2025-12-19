@@ -2,13 +2,15 @@
 /*
  * Copyright (c) Wipro Technologies Ltd, 2002.  All Rights Reserved.
  *    AUTHOR		: Saji Kumar.V.R <saji.kumar@wipro.com>
- *
+ */
+/*\
  * Gets round-robin time quantum by calling sched_rr_get_interval() and
  * checks that the value is sane.
  *
- * It is also a regression test for kernel
- * commit 975e155ed873 ("sched/rt: Show the 'sched_rr_timeslice' SCHED_RR
- * timeslice tuning knob in milliseconds").
+ * It is also a regression test for:
+ *
+ * - 975e155ed873 (sched/rt: Show the 'sched_rr_timeslice' SCHED_RR timeslice tuning knob in milliseconds)
+ * - c7fcb99877f9 ( sched/rt: Fix sysctl_sched_rr_timeslice intial value)
  */
 
 #include "time64_variants.h"
@@ -40,6 +42,8 @@ static void setup(void)
 	tst_res(TINFO, "Testing variant: %s", tv->desc);
 
 	tp.type = tv->ts_type;
+
+	tst_check_rt_group_sched_support();
 
 	if ((sys_sched_setscheduler(0, SCHED_RR, &p)) == -1)
 		tst_res(TFAIL | TERRNO, "sched_setscheduler() failed");

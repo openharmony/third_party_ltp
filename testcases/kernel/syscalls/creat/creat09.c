@@ -3,8 +3,6 @@
  * Copyright (c) 2021 SUSE LLC <mdoucha@suse.cz>
  */
 /*\
- * [Description]
- *
  * CVE-2018-13405
  *
  * Check for possible privilege escalation through creating files with setgid
@@ -138,6 +136,7 @@ static void cleanup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 1,
 	.test = run,
 	.setup = setup,
 	.cleanup = cleanup,

@@ -1,16 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010  Red Hat, Inc.
  */
 
 /*\
- * [Description]
- *
  * This is a reproducer copied from one of LKML patch submission
- * which subject is
- *
- * [PATCH] mlock: revert the optimization for dirtying pages and triggering writeback.
- * url see https://www.spinics.net/lists/kernel/msg1141090.html
+ * https://lore.kernel.org/lkml/1296371720-4176-1-git-send-email-tm@tao.ma/
  *
  * "In 5ecfda0, we do some optimization in mlock, but it causes
  * a very basic test case(attached below) of mlock to fail. So

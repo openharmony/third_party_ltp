@@ -53,7 +53,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
-#include "mem.h"
+#include "tst_test.h"
 #include "ksm_common.h"
 
 #ifdef HAVE_NUMA_V2
@@ -76,7 +76,7 @@ static void verify_ksm(void)
 	}
 	create_same_memory(size, num, unit);
 
-	write_cpusets(tst_cg, node);
+	write_node_cpusets(tst_cg, node);
 	SAFE_CG_PRINTF(tst_cg, "cgroup.procs", "%d", getpid());
 	create_same_memory(size, num, unit);
 	SAFE_CG_PRINTF(tst_cg_drain, "cgroup.procs", "%d", getpid());
@@ -87,7 +87,7 @@ static void setup(void)
 	parse_ksm_options(opt_sizestr, &size, opt_numstr, &num, opt_unitstr, &unit);
 
 	if (opt_sizestr && size > DEFAULT_MEMSIZE)
-		tst_set_max_runtime(32 * (size / DEFAULT_MEMSIZE));
+		tst_set_timeout(32 * (size / DEFAULT_MEMSIZE));
 }
 
 static struct tst_test test = {
@@ -107,6 +107,8 @@ static struct tst_test test = {
 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+		{"/sys/kernel/mm/ksm/smart_scan", "0",
+			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
 		{}
 	},
 	.needs_kconfigs = (const char *const[]){
@@ -114,7 +116,7 @@ static struct tst_test test = {
 		NULL
 	},
 	.test_all = verify_ksm,
-	.max_runtime = 32,
+	.timeout = 32,
 	.needs_cgroup_ctrls = (const char *const []){ "cpuset", NULL },
 };
 

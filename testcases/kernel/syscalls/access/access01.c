@@ -6,8 +6,6 @@
  */
 
 /*\
- * [Description]
- *
  * Basic test for access(2) using F_OK, R_OK, W_OK and X_OK
  */
 
@@ -314,6 +312,7 @@ static void setup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 1,
 	.needs_tmpdir = 1,
 	.needs_root = 1,
 	.forks_child = 1,
