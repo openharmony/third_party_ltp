@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014 SUSE.  All Rights Reserved.
  * Copyright (c) 2018 CTERA Networks.  All Rights Reserved.
@@ -8,7 +8,6 @@
  */
 
 /*\
- * [Description]
  * Check that fanotify properly merges ignore mask of a mount mark
  * with a mask of an inode mark on the same group.  Unlike the
  * prototype test fanotify06, do not use FAN_MODIFY event for the
@@ -103,7 +102,6 @@ static int ignore_mark_unsupported;
 #define DROP_CACHES_FILE "/proc/sys/vm/drop_caches"
 #define CACHE_PRESSURE_FILE "/proc/sys/vm/vfs_cache_pressure"
 
-static int old_cache_pressure;
 static pid_t child_pid;
 static int bind_mount_created;
 static unsigned int num_classes = NUM_CLASSES;
@@ -515,6 +513,12 @@ static void drop_caches(void)
 	if (syncfs(fd_syncfs) < 0)
 		tst_brk(TBROK | TERRNO, "Unexpected error when syncing filesystem");
 
+	/*
+	 * In order to ensure that the inode can be released in the two-tier
+	 * directory structure, drop_cache is required three times.
+	 */
+	SAFE_FILE_PRINTF(DROP_CACHES_FILE, "3");
+	SAFE_FILE_PRINTF(DROP_CACHES_FILE, "3");
 	SAFE_FILE_PRINTF(DROP_CACHES_FILE, "3");
 }
 
@@ -874,13 +878,17 @@ static void setup(void)
 {
 	int i;
 
-	exec_events_unsupported = fanotify_events_supported_by_kernel(FAN_OPEN_EXEC,
-								      FAN_CLASS_CONTENT, 0);
-	filesystem_mark_unsupported = fanotify_mark_supported_by_kernel(FAN_MARK_FILESYSTEM);
-	evictable_mark_unsupported = fanotify_mark_supported_by_kernel(FAN_MARK_EVICTABLE);
-	ignore_mark_unsupported = fanotify_mark_supported_by_kernel(FAN_MARK_IGNORE_SURV);
-	fan_report_dfid_unsupported = fanotify_init_flags_supported_on_fs(FAN_REPORT_DFID_NAME,
-									  MOUNT_PATH);
+	exec_events_unsupported = fanotify_flags_supported_on_fs(FAN_CLASS_CONTENT,
+					0, FAN_OPEN_EXEC, MOUNT_PATH);
+	filesystem_mark_unsupported = fanotify_mark_supported_on_fs(FAN_MARK_FILESYSTEM,
+								    MOUNT_PATH);
+	evictable_mark_unsupported = fanotify_mark_supported_on_fs(FAN_MARK_EVICTABLE,
+								   MOUNT_PATH);
+	ignore_mark_unsupported = fanotify_mark_supported_on_fs(FAN_MARK_IGNORE_SURV,
+								MOUNT_PATH);
+	fan_report_dfid_unsupported = fanotify_flags_supported_on_fs(FAN_REPORT_DFID_NAME,
+								     FAN_MARK_MOUNT,
+								     FAN_OPEN, MOUNT_PATH);
 	if (fan_report_dfid_unsupported) {
 		FANOTIFY_INIT_FLAGS_ERR_MSG(FAN_REPORT_DFID_NAME, fan_report_dfid_unsupported);
 		/* Limit tests to legacy priority classes */
@@ -916,7 +924,6 @@ static void setup(void)
 	SAFE_MKDIR(MNT2_PATH, 0755);
 	mount_cycle();
 
-	SAFE_FILE_SCANF(CACHE_PRESSURE_FILE, "%d", &old_cache_pressure);
 	/* Set high priority for evicting inodes */
 	SAFE_FILE_PRINTF(CACHE_PRESSURE_FILE, "500");
 }
@@ -929,8 +936,6 @@ static void cleanup(void)
 
 	if (bind_mount_created)
 		SAFE_UMOUNT(MNT2_PATH);
-
-	SAFE_FILE_PRINTF(CACHE_PRESSURE_FILE, "%d", old_cache_pressure);
 
 	for (i = 0; i < max_file_multi; i++) {
 		char path[PATH_MAX];
@@ -949,6 +954,7 @@ static void cleanup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 10,
 	.test = test_fanotify,
 	.tcnt = ARRAY_SIZE(tcases),
 	.test_variants = 2,
@@ -961,6 +967,10 @@ static struct tst_test test = {
 	.resource_files = (const char *const []) {
 		TEST_APP,
 		NULL
+	},
+	.save_restore = (const struct tst_path_val[]) {
+		{CACHE_PRESSURE_FILE, NULL, TST_SR_TCONF},
+		{}
 	},
 	.tags = (const struct tst_tag[]) {
 		{"linux-git", "9bdda4e9cf2d"},

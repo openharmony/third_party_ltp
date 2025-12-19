@@ -1,7 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*\
- *
- * [Description]
  *
  * Conversion of the forth kself test in cgroup/test_memcontrol.c.
  *
@@ -209,10 +207,14 @@ static void test_memcg_low(void)
 
 		if (i < E) {
 			TST_EXP_EXPR(low > 0,
-				     "(%c low events=%ld) > 0", id, low);
-		} else {
+				"(%c low events=%ld) > 0", id, low);
+		} else if (i == E) {
 			TST_EXP_EXPR(low == 0,
-				     "(%c low events=%ld) == 0", id, low);
+				"(%c low events=%ld) == 0", id, low);
+		} else if (!tst_cg_memory_recursiveprot(leaf_cg[F])) {
+			/* dont not check F when recursive_protection enabled */
+			TST_EXP_EXPR(low == 0,
+				"(%c low events=%ld) == 0", id, low);
 		}
 	}
 
@@ -232,7 +234,6 @@ static struct tst_test test = {
 	.cleanup = cleanup,
 	.test_all = test_memcg_low,
 	.mount_device = 1,
-	.dev_min_size = 256,
 	.mntpoint = TMPDIR,
 	.all_filesystems = 1,
 	.skip_filesystems = (const char *const[]){

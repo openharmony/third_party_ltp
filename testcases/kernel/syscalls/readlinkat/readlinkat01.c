@@ -7,8 +7,6 @@
  */
 
 /*\
- * [Description]
- *
  * Check the basic functionality of the readlinkat() system call.
  *
  * - readlinkat() passes if dirfd is directory file descriptor
@@ -66,10 +64,7 @@ static void verify_readlinkat(unsigned int i)
 
 static void setup(void)
 {
-	char *tmpdir = tst_get_tmpdir();
-
-	abspath = tst_aprintf("%s/" TEST_SYMLINK, tmpdir);
-	free(tmpdir);
+	abspath = tst_tmpdir_genpath(TEST_SYMLINK);
 
 	file_fd = SAFE_OPEN(TEST_FILE, O_CREAT, 0600);
 	SAFE_SYMLINK(TEST_FILE, TEST_SYMLINK);

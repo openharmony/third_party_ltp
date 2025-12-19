@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * Test for CVE-2022-0185.
  *
  * References links:
@@ -53,12 +51,14 @@ static void run(void)
 
 		if (!TST_RET) {
 			tst_res(TFAIL, "fsconfig() passed unexpectedly");
+			break;
 		} else if (TST_RET != -1) {
 			tst_brk(TBROK | TTERRNO,
 				"Invalid fsconfig() return value %ld", TST_RET);
 		} else if (TST_ERR != EINVAL) {
 			tst_res(TFAIL | TTERRNO,
 				"fsconfig() failed with unexpected error");
+			break;
 		}
 	}
 
@@ -80,6 +80,7 @@ static void cleanup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 9,
 	.test_all = run,
 	.setup = setup,
 	.cleanup = cleanup,

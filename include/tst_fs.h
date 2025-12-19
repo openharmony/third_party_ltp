@@ -6,7 +6,7 @@
 #ifndef TST_FS_H__
 #define TST_FS_H__
 
-/* man 2 statfs or kernel-source/include/linux/magic.h */
+/* man 2 statfs or kernel-source/include/uapi/linux/magic.h */
 #define TST_BTRFS_MAGIC    0x9123683E
 #define TST_NFS_MAGIC      0x6969
 #define TST_RAMFS_MAGIC    0x858458f6
@@ -34,6 +34,11 @@
 #define TST_VFAT_MAGIC     0x4d44 /* AKA MSDOS */
 #define TST_EXFAT_MAGIC    0x2011BAB0UL
 
+/* fs/bcachefs/bcachefs_format.h */
+#define TST_BCACHE_MAGIC		0xca451a4e
+
+#include <stdint.h>
+
 enum tst_fill_access_pattern {
 	TST_FILL_BLOCKS,
 	TST_FILL_RANDOM
@@ -57,7 +62,7 @@ enum {
  * @mult: mult should be TST_KB, TST_MB or TST_GB
  * the required free space is calculated by @size * @mult
  */
-int tst_fs_has_free_(void (*cleanup)(void), const char *path, unsigned int size,
+int tst_fs_has_free_(void (*cleanup)(void), const char *path, uint64_t size,
 		     unsigned int mult);
 
 /*
@@ -140,6 +145,16 @@ int tst_dir_is_empty_(void (*cleanup)(void), const char *name, int verbose);
  */
 int tst_get_path(const char *prog_name, char *buf, size_t buf_len);
 
+/**
+ * tst_path_exists() - checks if path exists
+ *
+ * @fmt: A printf-like format used to construct the path.
+ * @...: A printf-like parameter list.
+ * return: Non-zero if path exists, zero otherwise.
+ */
+int tst_path_exists(const char *fmt, ...)
+    __attribute__ ((format (printf, 1, 2)));
+
 /*
  * Fill a file with specified pattern
  * @fd: file descriptor
@@ -189,13 +204,6 @@ enum tst_fs_impl {
 enum tst_fs_impl tst_fs_is_supported(const char *fs_type);
 
 /*
- * Returns NULL-terminated array of kernel-supported filesystems.
- *
- * @skiplist A NULL terminated array of filesystems to skip.
- */
-const char **tst_get_supported_fs_types(const char *const *skiplist);
-
-/*
  * Returns 1 if filesystem is in skiplist 0 otherwise.
  *
  * @fs_type A filesystem type to lookup.
@@ -209,7 +217,10 @@ int tst_fs_in_skiplist(const char *fs_type, const char *const *skiplist);
 void tst_fill_fs(const char *path, int verbose, enum tst_fill_access_pattern pattern);
 
 /*
- * test if FIBMAP ioctl is supported
+ * Check if FIBMAP ioctl is supported.
+ * Tests needs to set .needs_root = 1 in order to avoid EPERM.
+ *
+ * @return 0: FIBMAP is supported, 1: FIBMAP is *not* supported.
  */
 int tst_fibmap(const char *filename);
 
@@ -219,7 +230,7 @@ static inline long tst_fs_type(const char *path)
 	return tst_fs_type_(NULL, path);
 }
 
-static inline int tst_fs_has_free(const char *path, unsigned int size,
+static inline int tst_fs_has_free(const char *path, uint64_t size,
 				  unsigned int mult)
 {
 	return tst_fs_has_free_(NULL, path, size, mult);
@@ -246,7 +257,7 @@ static inline long tst_fs_type(void (*cleanup)(void), const char *path)
 }
 
 static inline int tst_fs_has_free(void (*cleanup)(void), const char *path,
-				  unsigned int size, unsigned int mult)
+				  uint64_t size, unsigned int mult)
 {
 	return tst_fs_has_free_(cleanup, path, size, mult);
 }

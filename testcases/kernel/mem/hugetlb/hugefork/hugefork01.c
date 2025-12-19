@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * This checks copy-on-write semantics, specifically the semantics of a
  * MAP_PRIVATE mapping across a fork().  Some versions of the powerpc
  * kernel had a bug in huge_ptep_set_wrprotect() which would fail to
@@ -66,7 +64,7 @@ static void run_test(void)
 static void setup(void)
 {
 	hpage_size = SAFE_READ_MEMINFO("Hugepagesize:")*1024;
-	fd = tst_creat_unlinked(MNTPOINT, 0);
+	fd = tst_creat_unlinked(MNTPOINT, 0, 0600);
 }
 
 static void cleanup(void)

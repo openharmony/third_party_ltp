@@ -6,8 +6,6 @@
  */
 
 /*\
- * [Description]
- *
  * Tests ioctl() on loopdevice with LOOP_SET_CAPACITY flag.
  *
  * Tests whether LOOP_SET_CAPACITY can update a live
@@ -63,6 +61,7 @@ static void verify_ioctl_loop(void)
 
 	SAFE_CLOSE(file_fd);
 	tst_detach_device_by_fd(dev_path, dev_fd);
+	dev_fd = SAFE_OPEN(dev_path, O_RDWR);
 	unlink("test.img");
 	attach_flag = 0;
 }

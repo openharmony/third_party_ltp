@@ -11,12 +11,11 @@
 #include "config.h"
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <sys/mount.h>
 
-#ifndef HAVE_FSOPEN
-# ifdef HAVE_LINUX_MOUNT_H
-#  include <linux/mount.h>
-# endif
+#if !defined(HAVE_FSOPEN) && defined(HAVE_LINUX_MOUNT_H)
+# include <linux/mount.h>
+#else
+# include <sys/mount.h>
 #endif
 
 #include "lapi/fcntl.h"
@@ -119,6 +118,10 @@ static inline int mount_setattr(int dirfd, const char *from_pathname, unsigned i
  * New headers added in kernel after 5.2 release, create them for old userspace.
 */
 
+#ifndef MOVE_MOUNT_BENEATH
+# define MOVE_MOUNT_BENEATH 		0x00000200
+#endif
+
 #ifndef OPEN_TREE_CLONE
 
 /*
@@ -136,7 +139,7 @@ static inline int mount_setattr(int dirfd, const char *from_pathname, unsigned i
 #define MOVE_MOUNT_T_SYMLINKS		0x00000010 /* Follow symlinks on to path */
 #define MOVE_MOUNT_T_AUTOMOUNTS		0x00000020 /* Follow automounts on to path */
 #define MOVE_MOUNT_T_EMPTY_PATH		0x00000040 /* Empty to path permitted */
-#define MOVE_MOUNT__MASK		0x00000077
+#define MOVE_MOUNT__MASK		0x00000377
 
 /*
  * fsopen() flags.

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2019 Cyril Hrubis <chrubis@suse.cz>
+ * Copyright (c) Linux Test Project, 2019-2023
  */
 
-/*
+/*\
  * Very simple uevent netlink socket test.
  *
  * We fork a child that listens for a kernel events while parents creates and
@@ -25,6 +26,9 @@ static int mouse_fd;
 static void create_uinput_mouse(void)
 {
 	mouse_fd = open_uinput();
+	if (mouse_fd == -1)
+		tst_brk(TCONF, "Virtual device is not available");
+
 	setup_mouse_events(mouse_fd);
 	create_input_device(mouse_fd);
 }

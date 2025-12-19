@@ -1,12 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Linux Test Project, 2022
  * Copyright (c) Wipro Technologies Ltd, 2002.  All Rights Reserved.
  */
 
 /*\
- * [Description]
- *
  * Check mount(2) system call with various flags.
  *
  * Verify that mount(2) syscall passes for each flag setting and validate

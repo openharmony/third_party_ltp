@@ -56,7 +56,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "mem.h"
+#include "tst_test.h"
 #include "ksm_common.h"
 
 static void verify_ksm(void)
@@ -86,6 +86,8 @@ static struct tst_test test = {
 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+		{"/sys/kernel/mm/ksm/smart_scan", "0",
+			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
 		{}
 	},
 	.needs_kconfigs = (const char *const[]){

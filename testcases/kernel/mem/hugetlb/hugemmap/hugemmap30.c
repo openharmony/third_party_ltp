@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * readahead() on some kernels can cause the reservation counter to get
  * corrupted. The problem is that the pages are allocated for the
  * reservation but not faulted in at the time of allocation. The
@@ -27,7 +25,7 @@ static void run_test(void)
 	void *p;
 	unsigned long initial_rsvd, map_rsvd, readahead_rsvd, end_rsvd;
 
-	fd = tst_creat_unlinked(MNTPOINT, 0);
+	fd = tst_creat_unlinked(MNTPOINT, 0, 0600);
 	initial_rsvd = SAFE_READ_MEMINFO(MEMINFO_HPAGE_RSVD);
 
 	p = SAFE_MMAP(NULL, hpage_size, PROT_READ|PROT_WRITE, MAP_SHARED,

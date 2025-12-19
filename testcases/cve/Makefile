@@ -7,7 +7,7 @@ include $(top_srcdir)/include/mk/testcases.mk
 
 CFLAGS			+= -D_GNU_SOURCE
 
-stack_clash:	CFLAGS += -fno-optimize-sibling-calls
+stack_clash:	CFLAGS += -fno-optimize-sibling-calls -Wno-infinite-recursion
 
 cve-2016-7042:	LDLIBS += $(KEYUTILS_LIBS)
 
@@ -22,6 +22,12 @@ ifneq (,$(filter $(HOST_CPU),x86 x86_64))
 meltdown: CFLAGS += -msse2
 endif
 
+# The test needs to clobber %rbp, which requires frame pointer omission.  Also
+# for x86_64, disable AVX since that could sometimes require a stack
+# realignment, which gets in the way of frame pointer omission.
 cve-2015-3290:	CFLAGS += -pthread -fomit-frame-pointer
+ifeq ($(HOST_CPU),x86_64)
+cve-2015-3290: CFLAGS += -mno-avx
+endif
 
 include $(top_srcdir)/include/mk/generic_leaf_target.mk

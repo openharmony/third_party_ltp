@@ -7,8 +7,6 @@
  */
 
 /*\
- * [Description]
- *
  * Test for ENOENT, EEXIST, EINVAL, EACCES, EPERM errors.
  *
  * - ENOENT - No segment exists for the given key and IPC_CREAT was not specified.
@@ -37,8 +35,6 @@
 #include "libnewipc.h"
 #include "lapi/shm.h"
 
-#define CONFIG_HUGETLBFS "CONFIG_HUGETLBFS"
-
 static int shm_id = -1;
 static key_t shmkey, shmkey1;
 static struct passwd *pw;
@@ -66,10 +62,7 @@ static struct tcase {
 static int get_hugetlb_exp_error(void)
 {
 	long tmp;
-	struct tst_kconfig_var kconfig = {
-		.id = CONFIG_HUGETLBFS,
-		.id_len = sizeof(CONFIG_HUGETLBFS)-1,
-	};
+	struct tst_kconfig_var kconfig = TST_KCONFIG_INIT("CONFIG_HUGETLBFS");
 
 	tst_kconfig_read(&kconfig, 1);
 

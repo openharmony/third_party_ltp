@@ -4,8 +4,6 @@
  */
 
 /*\
- * [Description]
- *
  * Reproducer of CVE-2021-26708
  *
  * Based on POC https://github.com/jordan9001/vsock_poc.
@@ -112,7 +110,8 @@ static struct tst_test test = {
 	.setup = setup,
 	.cleanup = cleanup,
 	.taint_check = TST_TAINT_W | TST_TAINT_D,
-	.max_runtime = 60,
+	.runtime = 60,
+	.min_runtime = 2,
 	.needs_kconfigs = (const char *[]) {
 		"CONFIG_VSOCKETS_LOOPBACK",
 		NULL

@@ -46,7 +46,6 @@
 #include <errno.h>
 #include <linux/unistd.h>
 
-#include "lapi/mkdirat.h"
 #include "tst_safe_pthread.h"
 #include "tst_safe_stdio.h"
 #include "tst_test.h"
@@ -215,5 +214,5 @@ static struct tst_test test = {
 	.options = opts,
 	.test_all = do_test,
 	.setup = setup,
-	.max_runtime = 300,
+	.timeout = 300,
 };
