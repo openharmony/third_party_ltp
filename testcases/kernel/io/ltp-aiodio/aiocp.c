@@ -7,8 +7,6 @@
  */
 
 /*\
- * [Description]
- *
  * Copy file by using an async I/O state machine.
  *
  * - Start read request
@@ -322,7 +320,7 @@ static struct tst_test test = {
 	.setup = setup,
 	.cleanup = cleanup,
 	.needs_tmpdir = 1,
-	.max_runtime = 1800,
+	.runtime = 1800,
 	.needs_root = 1,
 	.options = (struct tst_option[]) {
 		{"b:", &str_aio_blksize, "Size of writing blocks (default 1K)"},

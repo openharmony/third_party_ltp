@@ -94,6 +94,10 @@
 # define AT_REMOVEDIR		0x200
 #endif
 
+#ifndef AT_HANDLE_FID
+# define AT_HANDLE_FID		AT_REMOVEDIR
+#endif
+
 #ifndef AT_SYMLINK_FOLLOW
 # define AT_SYMLINK_FOLLOW	0x400
 #endif
@@ -148,6 +152,14 @@
 
 #ifndef RENAME_WHITEOUT
 # define RENAME_WHITEOUT		(1 << 2)
+#endif
+
+#ifndef F_LINUX_SPECIFIC_BASE
+#define F_LINUX_SPECIFIC_BASE 1024
+#endif
+
+#ifndef F_CREATED_QUERY
+#define F_CREATED_QUERY (F_LINUX_SPECIFIC_BASE + 4)
 #endif
 
 /* splice, vmsplice, tee */

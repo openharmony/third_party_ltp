@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * This Test perform Direct Write/Read from/To hugetlbfs file
  * which is mapped to process address space. The test is checking if it
  * succeeds and data written or read is not corrupted.
@@ -23,7 +21,7 @@
 
 #define P0 "ffffffff"
 #define IOSZ 4096
-#define NORMAL_PATH ""
+#define NORMAL_PATH "./"
 #define MNTPOINT "hugetlbfs/"
 
 static long hpage_size;
@@ -34,8 +32,8 @@ static void run_test(void)
 	void *p;
 	char buf[IOSZ] __attribute__((aligned(IOSZ)));
 
-	fd = tst_creat_unlinked(MNTPOINT, 0);
-	nfd = tst_creat_unlinked(NORMAL_PATH, O_DIRECT);
+	fd = tst_creat_unlinked(MNTPOINT, 0, 0600);
+	nfd = tst_creat_unlinked(NORMAL_PATH, O_DIRECT, 0600);
 	p = SAFE_MMAP(NULL, hpage_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 	memcpy(p, P0, 8);
 

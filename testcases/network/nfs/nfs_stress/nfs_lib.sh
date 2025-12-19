@@ -4,9 +4,9 @@
 # Copyright (c) 2015-2018 Oracle and/or its affiliates. All Rights Reserved.
 # Copyright (c) International Business Machines  Corp., 2001
 
-VERSION=${VERSION:=3}
+VERSION=${VERSION:=4.2}
 NFILES=${NFILES:=1000}
-SOCKET_TYPE="${SOCKET_TYPE:-udp}"
+SOCKET_TYPE="${SOCKET_TYPE:-tcp}"
 NFS_TYPE=${NFS_TYPE:=nfs}
 
 nfs_usage()
@@ -168,6 +168,7 @@ nfs_setup()
 	local local_dir
 	local remote_dir
 	local mount_dir
+	local nfs_opts
 
 	if [ "$(stat -f . | grep "Type: nfs")" ]; then
 		tst_brk TCONF "Cannot run nfs-stress test on mounted NFS"
@@ -192,8 +193,14 @@ nfs_setup()
 		remote_dir="$(get_remote_dir $i $type)"
 		nfs_setup_server "$remote_dir" "$(($$ + n))"
 		local_dir="$(get_local_dir $i $n)"
+		nfs_opts="-o proto=$type,vers=$i"
+
+		if [ -n "$NFS_MOUNT_OPTS" ]; then
+			nfs_opts="$nfs_opts,$NFS_MOUNT_OPTS"
+		fi
+
 		tst_res TINFO "Mounting $local_dir"
-		nfs_mount "$local_dir" "$remote_dir" "-o proto=$type,vers=$i"
+		nfs_mount "$local_dir" "$remote_dir" "$nfs_opts"
 
 		n=$(( n + 1 ))
 	done
@@ -214,7 +221,7 @@ nfs_cleanup()
 		local_dir="$(get_local_dir $i $n)"
 		if grep -q "$local_dir" /proc/mounts; then
 			tst_res TINFO "Unmounting $local_dir"
-			umount $local_dir
+			umount $local_dir || tst_res TWARN "Unmount failed"
 		fi
 		n=$(( n + 1 ))
 	done

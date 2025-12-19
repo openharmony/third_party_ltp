@@ -4,11 +4,9 @@
  */
 
 /*\
- * [Description]
- *
  * Stress a possible race condition between memory pages allocation
- * and soft-offline of unrelated pages as explained in the commit:
- *   d4ae9916ea29 (mm: soft-offline: close the race against page allocation)
+ * and soft-offline of unrelated pages as explained in the commit from v4.18:
+ * d4ae9916ea29 (mm: soft-offline: close the race against page allocation)
  *
  * Control that soft-offlined pages get correctly replaced: with the
  * same content and without SIGBUS generation when accessed.
@@ -128,6 +126,8 @@ static int allocate_offline(int tnum)
 				return -1;
 
 			if (madvise(ptrs[num_alloc], pagesize, MADV_SOFT_OFFLINE) == -1) {
+				if (errno == EBUSY)
+					continue;
 				if (errno != EINVAL)
 					tst_res(TFAIL | TERRNO, "madvise failed");
 				if (errno == EINVAL)
@@ -307,9 +307,9 @@ static int open_unpoison_pfn(void)
 		SAFE_CMD(cmd_modprobe, NULL, NULL);
 
 	/* debugfs mount point */
-	mntf = setmntent("/etc/mtab", "r");
+	mntf = setmntent("/proc/mounts", "r");
 	if (!mntf) {
-		tst_brk(TBROK | TERRNO, "Can't open /etc/mtab");
+		tst_brk(TBROK | TERRNO, "Can't open /proc/mounts");
 		return -1;
 	}
 	while ((mnt = getmntent(mntf)) != NULL) {
@@ -426,7 +426,11 @@ static struct tst_test test = {
 		"rmmod",
 		NULL
 	},
-	.max_runtime = 30,
+	.needs_kconfigs = (const char *[]) {
+		"CONFIG_MEMORY_FAILURE=y",
+		NULL
+	},
+	.runtime = 30,
 	.needs_checkpoints = 1,
 	.setup = setup,
 	.cleanup = cleanup,

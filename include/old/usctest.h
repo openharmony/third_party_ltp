@@ -34,16 +34,8 @@
 #ifndef __USCTEST_H__
 #define __USCTEST_H__
 
-/*
- * Ensure that PATH_MAX is defined
- */
-#ifndef PATH_MAX
-#ifdef MAXPATHLEN
-#define PATH_MAX  MAXPATHLEN
-#else
-#define PATH_MAX  1024
-#endif
-#endif
+/* For PATH_MAX */
+#include <linux/limits.h>
 
 /***********************************************************************
  * The following globals are defined in parse_opts.c but must be
@@ -67,20 +59,6 @@ extern int TEST_ERRNO;
 		TEST_RETURN = SCALL; \
 		TEST_ERRNO = errno; \
 	} while (0)
-
-/***********************************************************************
- * TEST_VOID: calls a system call
- *
- * parameters:
- *	SCALL = system call and parameters to execute
- *
- * Note: This is IDENTICAL to the TEST() macro except that it is intended
- * for use with syscalls returning no values (void syscall()).  The
- * Typecasting nothing (void) into an unsigned integer causes compilation
- * errors.
- *
- ***********************************************************************/
-#define TEST_VOID(SCALL) do { errno = 0; SCALL; TEST_ERRNO = errno; } while (0)
 
 /***********************************************************************
  * TEST_PAUSE: Pause for SIGUSR1 if the pause flag is set.

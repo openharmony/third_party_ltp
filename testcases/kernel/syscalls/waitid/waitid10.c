@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * This test is checking if waitid() syscall recognizes a process that ended
  * with division by zero error.
  */
@@ -76,4 +74,5 @@ static struct tst_test test = {
 		{&infop, .size = sizeof(*infop)},
 		{},
 	},
+	.needs_tmpdir = 1,
 };

@@ -1,12 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) International Business Machines Corp., 2008
  * Copyright (C) 2022 SUSE LLC Andrea Cervesato <andrea.cervesato@suse.com>
  */
 
 /*\
- * [Description]
- *
  * Clone a process with CLONE_NEWPID flag and check that child container does
  * not get kill itself with SIGKILL.
  */

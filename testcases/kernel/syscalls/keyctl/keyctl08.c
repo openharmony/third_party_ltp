@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2017 Richard Palethorpe <rpalethorpe@suse.com>
+ * Copyright (c) Linux Test Project, 2019-2024
  */
-/* Check for CVE-2016-9604; that keys beginning with "." are disallowed.
+
+/*\
+ * Test for CVE-2016-9604, checks that keys beginning with "." are disallowed.
  *
- * See commit ee8f844e3c5a73b999edf733df1c529d6503ec2f
+ * See commit
+ * ee8f844e3c5a ("KEYS: Disallow keyrings beginning with '.' to be joined as session keyrings")
  */
 
 #include <errno.h>

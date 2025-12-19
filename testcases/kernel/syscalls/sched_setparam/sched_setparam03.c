@@ -6,8 +6,6 @@
  */
 
 /*\
- * [Description]
- *
  * Checks functionality for sched_setparam(2) for pid != 0
  *
  * This test forks a child and changes its parent's scheduling priority.
@@ -49,7 +47,7 @@ void setup(void)
 	tst_res(TINFO, "Testing %s variant", tv->desc);
 
 	if (tv->sched_setscheduler(0, SCHED_FIFO, &p))
-		tst_brk(TBROK | TERRNO, "sched_setcheduler(0, SCHED_FIFO, 1)");
+		tst_brk(TBROK | TERRNO, "sched_setscheduler(0, SCHED_FIFO, 1)");
 }
 
 static struct tst_test test = {

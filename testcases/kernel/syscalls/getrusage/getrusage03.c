@@ -1,12 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011  Red Hat, Inc.
  * Copyright (C) 2021 Xie Ziyao <xieziyao@huawei.com>
  */
 
 /*\
- * [Description]
- *
  * Test ru_maxrss behaviors in struct rusage.
  *
  * This test program is backported from upstream commit: 1f10206cf8e9, which
