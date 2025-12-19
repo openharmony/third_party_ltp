@@ -7,7 +7,6 @@
  */
 
 /*\
- * [Description]
  * Check fanotify FAN_ERROR_FS events triggered by intentionally
  * corrupted filesystems:
  *
@@ -62,7 +61,7 @@ static void trigger_fs_abort(void)
 
 static void do_debugfs_request(const char *dev, char *request)
 {
-	const char *const cmd[] = {"debugfs", "-w", dev, "-R", request, NULL};
+	const char *const cmd[] = {"debugfs", "-w", "-R", request, dev, NULL};
 
 	SAFE_CMD(cmd, NULL, NULL);
 }
@@ -296,7 +295,7 @@ static void setup(void)
 {
 	REQUIRE_FANOTIFY_EVENTS_SUPPORTED_ON_FS(FAN_CLASS_NOTIF|FAN_REPORT_FID,
 						FAN_MARK_FILESYSTEM,
-						FAN_FS_ERROR, ".");
+						FAN_FS_ERROR, MOUNT_PATH);
 	pre_corrupt_fs();
 
 	fd_notify = SAFE_FANOTIFY_INIT(FAN_CLASS_NOTIF|FAN_REPORT_FID,
@@ -319,9 +318,13 @@ static struct tst_test test = {
 	.mount_device = 1,
 	.mntpoint = MOUNT_PATH,
 	.needs_root = 1,
-	.dev_fs_type = "ext4",
+	.filesystems = (struct tst_fs []){
+		{.type = "ext4"},
+		{}
+	},
 	.tags = (const struct tst_tag[]) {
 		{"linux-git", "124e7c61deb2"},
+		{"linux-git", "76486b104168"},
 		{}
 	},
 	.needs_cmds = (const char *[]) {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014 SUSE.  All Rights Reserved.
  *
@@ -6,7 +6,6 @@
  */
 
 /*\
- * [Description]
  * Check that fanotify properly merges ignore mask of an inode and mountpoint.
  */
 
@@ -236,6 +235,7 @@ static void cleanup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 1,
 	.test = test_fanotify,
 	.tcnt = ARRAY_SIZE(tcases),
 	.setup = setup,

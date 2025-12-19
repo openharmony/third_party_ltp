@@ -6,7 +6,6 @@
  */
 
 /*\
- * [Description]
  * After fanotify_init adds flags FAN_REPORT_TID,
  * check whether the program can accurately identify which thread id
  * in the multithreaded program triggered the event.
@@ -94,7 +93,7 @@ static void test01(unsigned int i)
 
 static void setup(void)
 {
-	fan_report_tid_unsupported = fanotify_init_flags_supported_by_kernel(FAN_REPORT_TID);
+	fan_report_tid_unsupported = fanotify_init_flags_supported_on_fs(FAN_REPORT_TID, ".");
 }
 
 static struct tst_test test = {

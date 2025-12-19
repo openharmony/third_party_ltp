@@ -82,7 +82,8 @@ zram_makefs()
 		mkfs.$fs /dev/zram$i > err.log 2>&1
 		if [ $? -ne 0 ]; then
 			cat err.log
-			tst_brk TFAIL "failed to make $fs on /dev/zram$i"
+			tst_res TFAIL "Failed to make $fs on /dev/zram$i"
+			tst_brk TBROK "Can't continue with mounting the FS"
 		fi
 
 		i=$(($i + 1))
@@ -153,7 +154,7 @@ zram_fill_fs()
 			continue
 		fi
 
-		TST_RETRY_FUNC "check_read_mem_used_total /sys/block/zram$i/mm_stat" 0
+		TST_RETRY_FN_EXP_BACKOFF "check_read_mem_used_total /sys/block/zram$i/mm_stat" 0 10
 		mem_used_total=$(read_mem_used_total /sys/block/zram$i/mm_stat)
 		tst_res TINFO "mem_used_total: $mem_used_total"
 

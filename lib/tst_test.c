@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2015-2016 Cyril Hrubis <chrubis@suse.cz>
- * Copyright (c) Linux Test Project, 2016-2021
+ * Copyright (c) 2015-2025 Cyril Hrubis <chrubis@suse.cz>
+ * Copyright (c) Linux Test Project, 2016-2025
  */
+
+#define _GNU_SOURCE
 
 #include <limits.h>
 #include <stdio.h>
@@ -13,6 +15,7 @@
 #include <errno.h>
 #include <sys/mount.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <math.h>
 
@@ -35,13 +38,14 @@
 #include "old_device.h"
 #include "old_tmpdir.h"
 #include "ltp-version.h"
+#include "tst_hugepage.h"
 
 /*
  * Hack to get TCID defined in newlib tests
  */
 const char *TCID __attribute__((weak));
 
-/* update also docparse/testinfo.pl */
+/* update also doc/conf.py */
 #define LINUX_GIT_URL "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id="
 #define LINUX_STABLE_GIT_URL "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id="
 #define GLIBC_GIT_URL "https://sourceware.org/git/?p=glibc.git;a=commit;h="
@@ -50,36 +54,62 @@ const char *TCID __attribute__((weak));
 
 #define DEFAULT_TIMEOUT 30
 
+/* Magic number is "LTPM" */
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+# define LTP_MAGIC 0x4C54504D
+#else
+# define LTP_MAGIC 0x4D50544C
+#endif
+
 struct tst_test *tst_test;
 
-static const char *tid;
+static const char *tcid;
 static int iterations = 1;
 static float duration = -1;
 static float timeout_mul = -1;
-static pid_t main_pid, lib_pid;
-static int mntpoint_mounted;
-static int ovl_mounted;
-static struct timespec tst_start_time; /* valid only for test pid */
+static int reproducible_output;
+static int quiet_output;
 
-struct results {
-	int passed;
-	int skipped;
-	int failed;
-	int warnings;
-	int broken;
-	unsigned int timeout;
-	int max_runtime;
+struct context {
+	int32_t lib_pid;
+	int32_t main_pid;
+	struct timespec start_time;
+	int32_t runtime;
+	int32_t overall_time;
+	/*
+	 * This is set by a call to tst_brk() with TBROK parameter and means
+	 * that the test should exit immediately.
+	 */
+	tst_atomic_t abort_flag;
+	uint32_t mntpoint_mounted:1;
+	uint32_t ovl_mounted:1;
+	uint32_t tdebug:1;
 };
 
+struct results {
+	tst_atomic_t passed;
+	tst_atomic_t skipped;
+	tst_atomic_t failed;
+	tst_atomic_t warnings;
+	tst_atomic_t broken;
+};
+
+struct ipc_region {
+	int32_t magic;
+	struct context context;
+	struct results results;
+	futex_t futexes[];
+};
+
+static struct ipc_region *ipc;
+static struct context *context;
 static struct results *results;
 
-static int ipc_fd;
-
-extern void *tst_futexes;
+extern volatile void *tst_futexes;
 extern unsigned int tst_max_futexes;
 
+static int ipc_fd;
 static char ipc_path[1064];
-const char *tst_ipc_path = ipc_path;
 
 static char shm_path[1024];
 
@@ -96,7 +126,7 @@ static void setup_ipc(void)
 
 	if (access("/dev/shm", F_OK) == 0) {
 		snprintf(shm_path, sizeof(shm_path), "/dev/shm/ltp_%s_%d",
-			 tid, getpid());
+			 tcid, getpid());
 	} else {
 		char *tmpdir;
 
@@ -105,7 +135,7 @@ static void setup_ipc(void)
 
 		tmpdir = tst_get_tmpdir();
 		snprintf(shm_path, sizeof(shm_path), "%s/ltp_%s_%d",
-			 tmpdir, tid, getpid());
+			 tmpdir, tcid, getpid());
 		free(tmpdir);
 	}
 
@@ -116,21 +146,28 @@ static void setup_ipc(void)
 
 	SAFE_FTRUNCATE(ipc_fd, size);
 
-	results = SAFE_MMAP(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, ipc_fd, 0);
-
-	/* Checkpoints needs to be accessible from processes started by exec() */
-	if (tst_test->needs_checkpoints || tst_test->child_needs_reinit) {
-		sprintf(ipc_path, IPC_ENV_VAR "=%s", shm_path);
-		putenv(ipc_path);
-	} else {
-		SAFE_UNLINK(shm_path);
-	}
+	ipc = SAFE_MMAP(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, ipc_fd, 0);
 
 	SAFE_CLOSE(ipc_fd);
 
+	memset(ipc, 0, size);
+
+	ipc->magic = LTP_MAGIC;
+	context = &ipc->context;
+	results = &ipc->results;
+	context->lib_pid = getpid();
+
 	if (tst_test->needs_checkpoints) {
-		tst_futexes = (char *)results + sizeof(struct results);
-		tst_max_futexes = (size - sizeof(struct results))/sizeof(futex_t);
+		tst_futexes = ipc->futexes;
+		tst_max_futexes = (size - offsetof(struct ipc_region, futexes)) / sizeof(futex_t);
+	}
+
+	/* Set environment variable for exec()'d children */
+	if (tst_test->needs_checkpoints || tst_test->child_needs_reinit) {
+		snprintf(ipc_path, sizeof(ipc_path), IPC_ENV_VAR "=%s", shm_path);
+		putenv(ipc_path);
+	} else {
+		SAFE_UNLINK(shm_path);
 	}
 }
 
@@ -144,9 +181,11 @@ static void cleanup_ipc(void)
 	if (shm_path[0] && !access(shm_path, F_OK) && unlink(shm_path))
 		tst_res(TWARN | TERRNO, "unlink(%s) failed", shm_path);
 
-	if (results) {
-		msync((void *)results, size, MS_SYNC);
-		munmap((void *)results, size);
+	if (ipc) {
+		msync((void *)ipc, size, MS_SYNC);
+		munmap((void *)ipc, size);
+		ipc = NULL;
+		context = NULL;
 		results = NULL;
 	}
 }
@@ -164,12 +203,65 @@ void tst_reinit(void)
 		tst_brk(TBROK, "File %s does not exist!", path);
 
 	fd = SAFE_OPEN(path, O_RDWR);
-
-	results = SAFE_MMAP(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	tst_futexes = (char *)results + sizeof(struct results);
-	tst_max_futexes = (size - sizeof(struct results))/sizeof(futex_t);
-
+	ipc = SAFE_MMAP(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	SAFE_CLOSE(fd);
+
+	if (ipc->magic != LTP_MAGIC)
+		tst_brk(TBROK, "Invalid shared memory region (bad magic)");
+
+	/* Restore the parent context from IPC region */
+	context = &ipc->context;
+	results = &ipc->results;
+
+	tst_futexes = ipc->futexes;
+	tst_max_futexes = (size - offsetof(struct ipc_region, futexes)) / sizeof(futex_t);
+
+	if (context->tdebug)
+		tst_res(TINFO, "Restored metadata for PID %d", getpid());
+}
+
+extern char **environ;
+
+static unsigned int params_array_len(char *const array[])
+{
+	unsigned int ret = 0;
+
+	if (!array)
+		return 0;
+
+	while (*(array++))
+		ret++;
+
+	return ret;
+}
+
+int tst_run_script(const char *script_name, char *const params[])
+{
+	int pid;
+	unsigned int i, params_len = params_array_len(params);
+	char *argv[params_len + 2];
+
+	if (!tst_test->runs_script)
+		tst_brk(TBROK, "runs_script flag must be set!");
+
+	argv[0] = (char *)script_name;
+
+	if (params) {
+		for (i = 0; i < params_len; i++)
+			argv[i+1] = params[i];
+	}
+
+	argv[params_len+1] = NULL;
+
+	pid = SAFE_FORK();
+	if (pid)
+		return pid;
+
+	execvpe(script_name, argv, environ);
+
+	tst_brk(TBROK | TERRNO, "execvpe(%s, ...) failed!", script_name);
+
+	return -1;
 }
 
 static void update_results(int ttype)
@@ -216,13 +308,22 @@ static void print_result(const char *file, const int lineno, int ttype,
 		res = "TBROK";
 	break;
 	case TCONF:
+		if (quiet_output)
+			return;
 		res = "TCONF";
 	break;
 	case TWARN:
 		res = "TWARN";
 	break;
 	case TINFO:
+		if (quiet_output)
+			return;
 		res = "TINFO";
+	break;
+	case TDEBUG:
+		if (quiet_output)
+			return;
+		res = "TDEBUG";
 	break;
 	default:
 		tst_brk(TBROK, "Invalid ttype value %i", ttype);
@@ -256,6 +357,9 @@ static void print_result(const char *file, const int lineno, int ttype,
 	str += ret;
 	size -= ret;
 
+	if (reproducible_output)
+		goto print;
+
 	ssize = size - 2;
 	ret = vsnprintf(str, size, fmt, va);
 	str += MIN(ret, ssize);
@@ -273,6 +377,7 @@ static void print_result(const char *file, const int lineno, int ttype,
 				"Next message is too long and truncated:");
 	}
 
+print:
 	snprintf(str, size, "\n");
 
 	/* we might be called from signal handler, so use write() */
@@ -330,6 +435,14 @@ void tst_vbrk_(const char *file, const int lineno, int ttype, const char *fmt,
 	       va_list va)
 {
 	print_result(file, lineno, ttype, fmt, va);
+
+	/*
+	 * If tst_brk() is called from some of the C helpers even before the
+	 * library was initialized, just exit.
+	 */
+	if (!results || !context->lib_pid)
+		exit(TTYPE_RESULT(ttype));
+
 	update_results(TTYPE_RESULT(ttype));
 
 	/*
@@ -338,19 +451,60 @@ void tst_vbrk_(const char *file, const int lineno, int ttype, const char *fmt,
 	 * specified but CLONE_THREAD is not. Use direct syscall to avoid
 	 * cleanup running in the child.
 	 */
-	if (tst_getpid() == main_pid)
+	if (tst_getpid() == context->main_pid)
 		do_test_cleanup();
 
-	if (getpid() == lib_pid)
+	/*
+	 * The test library process reports result statistics and exits.
+	 */
+	if (getpid() == context->lib_pid)
 		do_exit(TTYPE_RESULT(ttype));
 
-	exit(TTYPE_RESULT(ttype));
+	/*
+	 * If we get here we are in a child process, either the main child
+	 * running the test or its children. If any of them called tst_brk()
+	 * with TBROK we need to exit the test. Otherwise we just exit the
+	 * current process.
+	 */
+	if (TTYPE_RESULT(ttype) == TBROK) {
+		if (results)
+			tst_atomic_inc(&context->abort_flag);
+
+		/*
+		 * If TBROK was called from one of the child processes we kill
+		 * the main test process. That in turn triggers the code that
+		 * kills leftover children once the main test process did exit.
+		 */
+		if (context->main_pid && tst_getpid() != context->main_pid) {
+			tst_res(TINFO, "Child process reported TBROK killing the test");
+			kill(context->main_pid, SIGKILL);
+		}
+	}
+
+	exit(0);
 }
 
 void tst_res_(const char *file, const int lineno, int ttype,
 	      const char *fmt, ...)
 {
 	va_list va;
+
+	/*
+	 * Suppress TDEBUG output in these cases:
+	 * 1. No context available (e.g., called before IPC initialization)
+	 * 2. Called from the library process, unless explicitly enabled
+	 * 3. Debug output is not enabled (context->tdebug == 0)
+	 */
+	if (ttype == TDEBUG) {
+		if (!context)
+			return;
+
+		if (context->lib_pid == getpid())
+			return;
+
+		if (!context->tdebug)
+			return;
+	}
 
 	va_start(va, fmt);
 	tst_vres_(file, lineno, ttype, fmt, va);
@@ -378,8 +532,6 @@ void tst_printf(const char *const fmt, ...)
 
 static void check_child_status(pid_t pid, int status)
 {
-	int ret;
-
 	if (WIFSIGNALED(status)) {
 		tst_brk(TBROK, "Child (%i) killed by signal %s", pid,
 			tst_strsig(WTERMSIG(status)));
@@ -388,15 +540,8 @@ static void check_child_status(pid_t pid, int status)
 	if (!(WIFEXITED(status)))
 		tst_brk(TBROK, "Child (%i) exited abnormally", pid);
 
-	ret = WEXITSTATUS(status);
-	switch (ret) {
-	case TPASS:
-	case TBROK:
-	case TCONF:
-	break;
-	default:
-		tst_brk(TBROK, "Invalid child (%i) exit value %i", pid, ret);
-	}
+	if (WEXITSTATUS(status))
+		tst_brk(TBROK, "Invalid child (%i) exit value %i", pid, WEXITSTATUS(status));
 }
 
 void tst_reap_children(void)
@@ -492,16 +637,17 @@ static void parse_mul(float *mul, const char *env_name, float min, float max)
 	}
 }
 
-static int multiply_runtime(int max_runtime)
+static int multiply_runtime(unsigned int runtime)
 {
 	static float runtime_mul = -1;
+	int min_runtime = 1;
 
-	if (max_runtime <= 0)
-		return max_runtime;
+	if (tst_test->min_runtime > 0)
+		min_runtime = tst_test->min_runtime;
 
 	parse_mul(&runtime_mul, "LTP_RUNTIME_MUL", 0.0099, 100);
 
-	return max_runtime * runtime_mul;
+	return MAX(runtime * runtime_mul, min_runtime);
 }
 
 static struct option {
@@ -511,8 +657,8 @@ static struct option {
 	{"h",  "-h       Prints this help"},
 	{"i:", "-i n     Execute test n times"},
 	{"I:", "-I x     Execute test for n seconds"},
+	{"D",  "-D       Prints debug information"},
 	{"V",  "-V       Prints LTP version"},
-	{"C:", "-C ARG   Run child process with ARG arguments (used internally)"},
 };
 
 static void print_help(void)
@@ -520,40 +666,44 @@ static void print_help(void)
 	unsigned int i;
 	int timeout, runtime;
 
-	/* see doc/user-guide.txt, which lists also shell API variables */
+	/* see doc/users/setup_tests.rst, which lists also shell API variables */
 	fprintf(stderr, "Environment Variables\n");
 	fprintf(stderr, "---------------------\n");
-	fprintf(stderr, "KCONFIG_PATH         Specify kernel config file\n");
-	fprintf(stderr, "KCONFIG_SKIP_CHECK   Skip kernel config check if variable set (not set by default)\n");
-	fprintf(stderr, "LTPROOT              Prefix for installed LTP (default: /opt/ltp)\n");
-	fprintf(stderr, "LTP_COLORIZE_OUTPUT  Force colorized output behaviour (y/1 always, n/0: never)\n");
-	fprintf(stderr, "LTP_DEV              Path to the block device to be used (for .needs_device)\n");
-	fprintf(stderr, "LTP_DEV_FS_TYPE      Filesystem used for testing (default: %s)\n", DEFAULT_FS_TYPE);
-	fprintf(stderr, "LTP_SINGLE_FS_TYPE   Testing only - specifies filesystem instead all supported (for .all_filesystems)\n");
-	fprintf(stderr, "LTP_TIMEOUT_MUL      Timeout multiplier (must be a number >=1)\n");
-	fprintf(stderr, "LTP_RUNTIME_MUL      Runtime multiplier (must be a number >=1)\n");
-	fprintf(stderr, "LTP_VIRT_OVERRIDE    Overrides virtual machine detection (values: \"\"|kvm|microsoft|xen|zvm)\n");
-	fprintf(stderr, "TMPDIR               Base directory for template directory (for .needs_tmpdir, default: %s)\n", TEMPDIR);
+	fprintf(stderr, "KCONFIG_PATH             Specify kernel config file\n");
+	fprintf(stderr, "KCONFIG_SKIP_CHECK       Skip kernel config check if variable set (not set by default)\n");
+	fprintf(stderr, "LTPROOT                  Prefix for installed LTP (default: /opt/ltp)\n");
+	fprintf(stderr, "LTP_COLORIZE_OUTPUT      Force colorized output behaviour (y/1 always, n/0: never)\n");
+	fprintf(stderr, "LTP_DEV                  Path to the block device to be used (for .needs_device)\n");
+	fprintf(stderr, "LTP_DEV_FS_TYPE          Filesystem used for testing (default: %s)\n", DEFAULT_FS_TYPE);
+	fprintf(stderr, "LTP_ENABLE_DEBUG         Print debug messages (set 1 or y)\n");
+	fprintf(stderr, "LTP_REPRODUCIBLE_OUTPUT  Values 1 or y discard the actual content of the messages printed by the test\n");
+	fprintf(stderr, "LTP_QUIET                Values 1 or y will suppress printing TCONF, TWARN, TINFO, and TDEBUG messages\n");
+	fprintf(stderr, "LTP_SINGLE_FS_TYPE       Specifies filesystem instead all supported (for .all_filesystems)\n");
+	fprintf(stderr, "LTP_FORCE_SINGLE_FS_TYPE Testing only. The same as LTP_SINGLE_FS_TYPE but ignores test skiplist.\n");
+	fprintf(stderr, "LTP_TIMEOUT_MUL          Timeout multiplier (must be a number >=1)\n");
+	fprintf(stderr, "LTP_RUNTIME_MUL          Runtime multiplier (must be a number >0)\n");
+	fprintf(stderr, "LTP_VIRT_OVERRIDE        Overrides virtual machine detection (values: \"\"|kvm|microsoft|xen|zvm)\n");
+	fprintf(stderr, "TMPDIR                   Base directory for template directory (for .needs_tmpdir, default: %s)\n", TEMPDIR);
 	fprintf(stderr, "\n");
 
 	fprintf(stderr, "Timeout and runtime\n");
 	fprintf(stderr, "-------------------\n");
 
-	if (tst_test->max_runtime) {
-		runtime = multiply_runtime(tst_test->max_runtime);
+	if (tst_test->timeout == TST_UNLIMITED_TIMEOUT) {
+		fprintf(stderr, "Test timeout is not limited\n");
+	} else {
+		timeout = tst_multiply_timeout(DEFAULT_TIMEOUT + tst_test->timeout);
 
-		if (runtime == TST_UNLIMITED_RUNTIME) {
-			fprintf(stderr, "Test iteration runtime is not limited\n");
-		} else {
-			fprintf(stderr, "Test iteration runtime cap %ih %im %is\n",
-				runtime/3600, (runtime%3600)/60, runtime % 60);
-		}
+		fprintf(stderr, "Test timeout (not including runtime) %ih %im %is\n",
+				timeout/3600, (timeout%3600)/60, timeout % 60);
 	}
 
-	timeout = tst_multiply_timeout(DEFAULT_TIMEOUT);
+	if (tst_test->runtime) {
+		runtime = multiply_runtime(tst_test->runtime);
 
-	fprintf(stderr, "Test timeout (not including runtime) %ih %im %is\n",
-		timeout/3600, (timeout%3600)/60, timeout % 60);
+		fprintf(stderr, "Test iteration runtime cap %ih %im %is\n",
+				runtime/3600, (runtime%3600)/60, runtime % 60);
+	}
 
 	fprintf(stderr, "\n");
 
@@ -652,11 +802,6 @@ static void parse_topt(unsigned int topts_len, int opt, char *optarg)
 	*(toptions[i].arg) = optarg ? optarg : "";
 }
 
-/* see self_exec.c */
-#ifdef UCLINUX
-extern char *child_args;
-#endif
-
 static void parse_opts(int argc, char *argv[])
 {
 	unsigned int i, topts_len = count_options();
@@ -679,6 +824,10 @@ static void parse_opts(int argc, char *argv[])
 			print_help();
 			tst_brk(TBROK, "Invalid option");
 		break;
+		case 'D':
+			tst_res(TINFO, "Enabling debug info");
+			context->tdebug = 1;
+		break;
 		case 'h':
 			print_help();
 			print_test_tags();
@@ -687,19 +836,14 @@ static void parse_opts(int argc, char *argv[])
 			iterations = SAFE_STRTOL(optarg, 0, INT_MAX);
 		break;
 		case 'I':
-			if (tst_test->max_runtime > 0)
-				tst_test->max_runtime = SAFE_STRTOL(optarg, 1, INT_MAX);
+			if (tst_test->runtime > 0)
+				tst_test->runtime = SAFE_STRTOL(optarg, 1, INT_MAX);
 			else
 				duration = SAFE_STRTOF(optarg, 0.1, HUGE_VALF);
 		break;
 		case 'V':
 			fprintf(stderr, "LTP version: " LTP_VERSION "\n");
 			exit(0);
-		break;
-		case 'C':
-#ifdef UCLINUX
-			child_args = optarg;
-#endif
 		break;
 		default:
 			parse_topt(topts_len, opt, optarg);
@@ -851,7 +995,9 @@ static void print_failure_hint(const char *tag, const char *hint,
 	}
 }
 
-/* update also docparse/testinfo.pl */
+static int show_failure_hints;
+
+/* update also doc/conf.py */
 static void print_failure_hints(void)
 {
 	print_failure_hint("linux-git", "missing kernel fixes", LINUX_GIT_URL);
@@ -861,8 +1007,18 @@ static void print_failure_hints(void)
 	print_failure_hint("musl-git", "missing musl fixes", MUSL_GIT_URL);
 	print_failure_hint("CVE", "vulnerable to CVE(s)", CVE_DB_URL);
 	print_failure_hint("known-fail", "hit by known kernel failures", NULL);
+
+	show_failure_hints = 0;
 }
 
+/*
+ * Prints results, cleans up after the test library and exits the test library
+ * process. The ret parameter is used to pass the result flags in a case of a
+ * failure before we managed to set up the shared memory where we store the
+ * results. This allows us to use SAFE_MACROS() in the initialization of the
+ * shared memory. The ret parameter is not used (passed 0) when called
+ * explicitly from the rest of the library.
+ */
 static void do_exit(int ret)
 {
 	if (results) {
@@ -871,7 +1027,8 @@ static void do_exit(int ret)
 
 		if (results->failed) {
 			ret |= TFAIL;
-			print_failure_hints();
+			if (show_failure_hints)
+				print_failure_hints();
 		}
 
 		if (results->skipped && !results->passed)
@@ -882,7 +1039,8 @@ static void do_exit(int ret)
 
 		if (results->broken) {
 			ret |= TBROK;
-			print_failure_hints();
+			if (show_failure_hints)
+				print_failure_hints();
 		}
 
 		fprintf(stderr, "\nSummary:\n");
@@ -898,20 +1056,29 @@ static void do_exit(int ret)
 	exit(ret);
 }
 
-void check_kver(void)
+int check_kver(const char *min_kver, const int brk_nosupp)
 {
+	char *msg;
 	int v1, v2, v3;
 
-	if (tst_parse_kver(tst_test->min_kver, &v1, &v2, &v3)) {
+	if (tst_parse_kver(min_kver, &v1, &v2, &v3)) {
 		tst_res(TWARN,
 			"Invalid kernel version %s, expected %%d.%%d.%%d",
-			tst_test->min_kver);
+			min_kver);
 	}
 
 	if (tst_kvercmp(v1, v2, v3) < 0) {
-		tst_brk(TCONF, "The test requires kernel %s or newer",
-			tst_test->min_kver);
+		msg = "The test requires kernel %s or newer";
+
+		if (brk_nosupp)
+			tst_brk(TCONF, msg, min_kver);
+		else
+			tst_res(TCONF, msg, min_kver);
+
+		return 1;
 	}
+
+	return 0;
 }
 
 static int results_equal(struct results *a, struct results *b)
@@ -948,7 +1115,7 @@ static void copy_resources(void)
 		TST_RESOURCE_COPY(NULL, tst_test->resource_files[i], NULL);
 }
 
-static const char *get_tid(char *argv[])
+static const char *get_tcid(char *argv[])
 {
 	char *p;
 
@@ -1004,7 +1171,7 @@ static int prepare_and_mount_ro_fs(const char *dev, const char *mntpoint,
 		return 1;
 	}
 
-	mntpoint_mounted = 1;
+	context->mntpoint_mounted = 1;
 
 	snprintf(buf, sizeof(buf), "%s/dir/", mntpoint);
 	SAFE_MKDIR(buf, 0777);
@@ -1028,17 +1195,20 @@ static void prepare_and_mount_dev_fs(const char *mntpoint)
 		tst_res(TINFO, "tmpdir isn't suitable for creating devices, "
 			"mounting tmpfs without nodev on %s", mntpoint);
 		SAFE_MOUNT(NULL, mntpoint, "tmpfs", 0, NULL);
-		mntpoint_mounted = 1;
+		context->mntpoint_mounted = 1;
 	}
 }
 
 static void prepare_and_mount_hugetlb_fs(void)
 {
+	if (access(PATH_HUGEPAGES, F_OK))
+		tst_brk(TCONF, "hugetlbfs is not supported");
+
 	SAFE_MOUNT("none", tst_test->mntpoint, "hugetlbfs", 0, NULL);
-	mntpoint_mounted = 1;
+	context->mntpoint_mounted = 1;
 }
 
-int tst_creat_unlinked(const char *path, int flags)
+int tst_creat_unlinked(const char *path, int flags, mode_t mode)
 {
 	char template[PATH_MAX];
 	int len, c, range;
@@ -1046,7 +1216,7 @@ int tst_creat_unlinked(const char *path, int flags)
 	int start[3] = {'0', 'a', 'A'};
 
 	snprintf(template, PATH_MAX, "%s/ltp_%.3sXXXXXX",
-			path, tid);
+			path, tcid);
 
 	len = strlen(template) - 1;
 	while (template[len] == 'X') {
@@ -1057,7 +1227,7 @@ int tst_creat_unlinked(const char *path, int flags)
 	}
 
 	flags |= O_CREAT|O_EXCL|O_RDWR;
-	fd = SAFE_OPEN(template, flags);
+	fd = SAFE_OPEN(template, flags, mode);
 	SAFE_UNLINK(template);
 	return fd;
 }
@@ -1096,15 +1266,18 @@ static const char *get_device_name(const char *fs_type)
 		return tdev.dev;
 }
 
-static void prepare_device(void)
+static void prepare_device(struct tst_fs *fs)
 {
 	const char *mnt_data;
 	char buf[1024];
+	struct tst_fs dummy = {};
 
-	if (tst_test->format_device) {
-		SAFE_MKFS(tdev.dev, tdev.fs_type, tst_test->dev_fs_opts,
-			  tst_test->dev_extra_opts);
-	}
+	fs = fs ?: &dummy;
+
+	const char *const extra[] = {fs->mkfs_size_opt, NULL};
+
+	if (tst_test->format_device)
+		SAFE_MKFS(tdev.dev, tdev.fs_type, fs->mkfs_opts, extra);
 
 	if (tst_test->needs_rofs) {
 		prepare_and_mount_ro_fs(tdev.dev, tst_test->mntpoint,
@@ -1113,12 +1286,12 @@ static void prepare_device(void)
 	}
 
 	if (tst_test->mount_device) {
-		mnt_data = limit_tmpfs_mount_size(tst_test->mnt_data,
+		mnt_data = limit_tmpfs_mount_size(fs->mnt_data,
 				buf, sizeof(buf), tdev.fs_type);
 
-		SAFE_MOUNT(get_device_name(tdev.fs_type), tst_test->mntpoint,
-				tdev.fs_type, tst_test->mnt_flags, mnt_data);
-		mntpoint_mounted = 1;
+		SAFE_MOUNT2(get_device_name(tdev.fs_type), tst_test->mntpoint,
+				tdev.fs_type, fs->mnt_flags, mnt_data, &tdev.is_fuse);
+		context->mntpoint_mounted = 1;
 	}
 }
 
@@ -1126,6 +1299,7 @@ static void do_cgroup_requires(void)
 {
 	const struct tst_cg_opts cg_opts = {
 		.needs_ver = tst_test->needs_cgroup_ver,
+		.needs_nsdelegate = tst_test->needs_cgroup_nsdelegate,
 	};
 	const char *const *ctrl_names = tst_test->needs_cgroup_ctrls;
 
@@ -1135,27 +1309,113 @@ static void do_cgroup_requires(void)
 	tst_cg_init();
 }
 
+#define tst_set_ulimit(conf) \
+	set_ulimit_(__FILE__, __LINE__, (conf))
+
+/*
+ * Set resource limits.
+ */
+static void set_ulimit_(const char *file, const int lineno, const struct tst_ulimit_val *conf)
+{
+	struct rlimit rlim;
+
+	safe_getrlimit(file, lineno, conf->resource, &rlim);
+
+	rlim.rlim_cur = conf->rlim_cur;
+
+	if (conf->rlim_cur > rlim.rlim_max)
+		rlim.rlim_max = conf->rlim_cur;
+
+	tst_res_(file, lineno, TINFO, "Set ulimit resource: %d rlim_cur: %llu rlim_max: %llu",
+		conf->resource, (long long unsigned int)rlim.rlim_cur,
+		(long long unsigned int)rlim.rlim_max);
+
+	safe_setrlimit(file, lineno, conf->resource, &rlim);
+}
+
+static unsigned int count_fs_descs(void)
+{
+	unsigned int ret = 0;
+
+	if (!tst_test->filesystems)
+		return 0;
+
+	/*
+	 * First entry is special, if it has zero type it's the default entry
+	 * and is either followed by a terminating entry or by filesystem
+	 * description(s) plus terminating entry.
+	 */
+	if (!tst_test->filesystems[0].type)
+		ret = 1;
+
+	while (tst_test->filesystems[ret].type)
+		ret++;
+
+	return ret;
+}
+
+static const char *default_fs_type(void)
+{
+	if (!tst_test->filesystems)
+		return tst_dev_fs_type();
+
+	if (tst_test->filesystems[0].type)
+		return tst_test->filesystems[0].type;
+
+	return tst_dev_fs_type();
+}
+
 static void do_setup(int argc, char *argv[])
 {
+	char *tdebug_env = getenv("LTP_ENABLE_DEBUG");
+	char *reproducible_env = getenv("LTP_REPRODUCIBLE_OUTPUT");
+	char *quiet_env = getenv("LTP_QUIET");
+
 	if (!tst_test)
 		tst_brk(TBROK, "No tests to run");
 
-	if (tst_test->max_runtime < -1) {
-		tst_brk(TBROK, "Invalid runtime value %i",
-			results->max_runtime);
+	if (tst_test->timeout < -1) {
+		tst_brk(TBROK, "Invalid timeout value %i",
+			tst_test->timeout);
 	}
+
+	if (tst_test->runtime < 0)
+		tst_brk(TBROK, "Invalid runtime value %i", tst_test->runtime);
 
 	if (tst_test->tconf_msg)
 		tst_brk(TCONF, "%s", tst_test->tconf_msg);
 
-	assert_test_fn();
-
-	TCID = tid = get_tid(argv);
+	if (tst_test->supported_archs && !tst_is_on_arch(tst_test->supported_archs))
+		tst_brk(TCONF, "This arch '%s' is not supported for test!", tst_arch.name);
 
 	if (tst_test->sample)
 		tst_test = tst_timer_test_setup(tst_test);
 
+	if (tst_test->runs_script) {
+		tst_test->child_needs_reinit = 1;
+		tst_test->forks_child = 1;
+	}
+
+	if (reproducible_env &&
+	    (!strcmp(reproducible_env, "1") || !strcmp(reproducible_env, "y")))
+		reproducible_output = 1;
+
+	if (quiet_env &&
+	    (!strcmp(quiet_env, "1") || !strcmp(quiet_env, "y")))
+		quiet_output = 1;
+
+	assert_test_fn();
+
+	TCID = tcid = get_tcid(argv);
+
+	setup_ipc();
+
 	parse_opts(argc, argv);
+
+	if (tdebug_env && (!strcmp(tdebug_env, "1") || !strcmp(tdebug_env, "y"))) {
+		tst_res(TINFO, "Enabling debug info");
+		context->tdebug = 1;
+	}
 
 	if (tst_test->needs_kconfigs && tst_kconfig_check(tst_test->needs_kconfigs))
 		tst_brk(TCONF, "Aborting due to unsuitable kernel config, see above!");
@@ -1164,10 +1424,7 @@ static void do_setup(int argc, char *argv[])
 		tst_brk(TCONF, "Test needs to be run as root");
 
 	if (tst_test->min_kver)
-		check_kver();
-
-	if (tst_test->supported_archs && !tst_is_on_arch(tst_test->supported_archs))
-		tst_brk(TCONF, "This arch '%s' is not supported for test!", tst_arch.name);
+		check_kver(tst_test->min_kver, 1);
 
 	if (tst_test->skip_in_lockdown && tst_lockdown_enabled() > 0)
 		tst_brk(TCONF, "Kernel is locked down, skipping test");
@@ -1175,15 +1432,18 @@ static void do_setup(int argc, char *argv[])
 	if (tst_test->skip_in_secureboot && tst_secureboot_enabled() > 0)
 		tst_brk(TCONF, "SecureBoot enabled, skipping test");
 
-	if (tst_test->skip_in_compat && TST_ABI != tst_kernel_bits())
+	if (tst_test->skip_in_compat && tst_is_compat_mode())
 		tst_brk(TCONF, "Not supported in 32-bit compat mode");
+
+	if (tst_test->needs_abi_bits && !tst_abi_bits(tst_test->needs_abi_bits))
+		tst_brk(TCONF, "%dbit ABI is not supported", tst_test->needs_abi_bits);
 
 	if (tst_test->needs_cmds) {
 		const char *cmd;
 		int i;
 
 		for (i = 0; (cmd = tst_test->needs_cmds[i]); ++i)
-			tst_check_cmd(cmd);
+			tst_check_cmd(cmd, 1);
 	}
 
 	if (tst_test->needs_drivers) {
@@ -1216,8 +1476,6 @@ static void do_setup(int argc, char *argv[])
 	if (tst_test->hugepages.number)
 		tst_reserve_hugepages(&tst_test->hugepages);
 
-	setup_ipc();
-
 	if (tst_test->bufs)
 		tst_buffers_alloc(tst_test->bufs);
 
@@ -1229,6 +1487,15 @@ static void do_setup(int argc, char *argv[])
 
 		while (pvl->path) {
 			tst_sys_conf_save(pvl);
+			pvl++;
+		}
+	}
+
+	if (tst_test->ulimit) {
+		const struct tst_ulimit_val *pvl = tst_test->ulimit;
+
+		while (pvl->resource) {
+			tst_set_ulimit(pvl);
 			pvl++;
 		}
 	}
@@ -1267,7 +1534,7 @@ static void do_setup(int argc, char *argv[])
 	if (tst_test->needs_hugetlbfs)
 		prepare_and_mount_hugetlb_fs();
 
-	if (tst_test->needs_device && !mntpoint_mounted) {
+	if (tst_test->needs_device && !context->mntpoint_mounted) {
 		tdev.dev = tst_acquire_device_(NULL, tst_test->dev_min_size);
 
 		if (!tdev.dev)
@@ -1277,24 +1544,28 @@ static void do_setup(int argc, char *argv[])
 
 		tst_device = &tdev;
 
-		if (tst_test->dev_fs_type)
-			tdev.fs_type = tst_test->dev_fs_type;
-		else
-			tdev.fs_type = tst_dev_fs_type();
+		tdev.fs_type = default_fs_type();
 
-		if (!tst_test->all_filesystems)
-			prepare_device();
+		if (!tst_test->all_filesystems && count_fs_descs() <= 1) {
+			if (tst_test->filesystems && tst_test->filesystems->mkfs_ver)
+				tst_check_cmd(tst_test->filesystems->mkfs_ver, 1);
+
+			if (tst_test->filesystems && tst_test->filesystems->min_kver)
+				check_kver(tst_test->filesystems->min_kver, 1);
+
+			prepare_device(tst_test->filesystems);
+		}
 	}
 
 	if (tst_test->needs_overlay && !tst_test->mount_device)
 		tst_brk(TBROK, "tst_test->mount_device must be set");
 
-	if (tst_test->needs_overlay && !mntpoint_mounted)
+	if (tst_test->needs_overlay && !context->mntpoint_mounted)
 		tst_brk(TBROK, "tst_test->mntpoint must be mounted");
 
-	if (tst_test->needs_overlay && !ovl_mounted) {
+	if (tst_test->needs_overlay && !context->ovl_mounted) {
 		SAFE_MOUNT_OVERLAY();
-		ovl_mounted = 1;
+		context->ovl_mounted = 1;
 	}
 
 	if (tst_test->resource_files)
@@ -1314,7 +1585,7 @@ static void do_setup(int argc, char *argv[])
 
 static void do_test_setup(void)
 {
-	main_pid = getpid();
+	context->main_pid = getpid();
 
 	if (!tst_test->all_filesystems && tst_test->skip_filesystems) {
 		long fs_type = tst_fs_type(".");
@@ -1334,7 +1605,7 @@ static void do_test_setup(void)
 	if (tst_test->setup)
 		tst_test->setup();
 
-	if (main_pid != tst_getpid())
+	if (context->main_pid != tst_getpid())
 		tst_brk(TBROK, "Runaway child in setup()!");
 
 	if (tst_test->caps)
@@ -1346,10 +1617,10 @@ static void do_cleanup(void)
 	if (tst_test->needs_cgroup_ctrls)
 		tst_cg_cleanup();
 
-	if (ovl_mounted)
+	if (context->ovl_mounted)
 		SAFE_UMOUNT(OVL_MNT);
 
-	if (mntpoint_mounted)
+	if (context->mntpoint_mounted)
 		tst_umount(tst_test->mntpoint);
 
 	if (tst_test->needs_device && tdev.dev)
@@ -1371,7 +1642,7 @@ static void do_cleanup(void)
 
 static void heartbeat(void)
 {
-	if (tst_clock_gettime(CLOCK_MONOTONIC, &tst_start_time))
+	if (tst_clock_gettime(CLOCK_MONOTONIC, &context->start_time))
 		tst_res(TWARN | TERRNO, "tst_clock_gettime() failed");
 
 	if (getppid() == 1) {
@@ -1397,13 +1668,14 @@ static void run_tests(void)
 		heartbeat();
 		tst_test->test_all();
 
-		if (tst_getpid() != main_pid)
+		if (tst_getpid() != context->main_pid)
 			exit(0);
 
 		tst_reap_children();
 
 		if (results_equal(&saved_results, results))
 			tst_brk(TBROK, "Test haven't reported results!");
+
 		return;
 	}
 
@@ -1412,7 +1684,7 @@ static void run_tests(void)
 		heartbeat();
 		tst_test->test(i);
 
-		if (tst_getpid() != main_pid)
+		if (tst_getpid() != context->main_pid)
 			exit(0);
 
 		tst_reap_children();
@@ -1498,6 +1770,7 @@ static volatile sig_atomic_t sigkill_retries;
 static void alarm_handler(int sig LTP_ATTRIBUTE_UNUSED)
 {
 	WRITE_MSG("Test timeouted, sending SIGKILL!\n");
+
 	kill(-test_pid, SIGKILL);
 	alarm(5);
 
@@ -1511,7 +1784,7 @@ static void alarm_handler(int sig LTP_ATTRIBUTE_UNUSED)
 
 static void heartbeat_handler(int sig LTP_ATTRIBUTE_UNUSED)
 {
-	alarm(results->timeout);
+	alarm(context->overall_time);
 	sigkill_retries = 0;
 }
 
@@ -1528,18 +1801,15 @@ unsigned int tst_remaining_runtime(void)
 	static struct timespec now;
 	int elapsed;
 
-	if (results->max_runtime == TST_UNLIMITED_RUNTIME)
-		return UINT_MAX;
-
-	if (results->max_runtime == 0)
+	if (context->runtime == 0)
 		tst_brk(TBROK, "Runtime not set!");
 
 	if (tst_clock_gettime(CLOCK_MONOTONIC, &now))
 		tst_res(TWARN | TERRNO, "tst_clock_gettime() failed");
 
-	elapsed = tst_timespec_diff_ms(now, tst_start_time) / 1000;
-	if (results->max_runtime > elapsed)
-		return results->max_runtime - elapsed;
+	elapsed = tst_timespec_diff_ms(now, context->start_time) / 1000;
+	if (context->runtime > elapsed)
+		return context->runtime - elapsed;
 
 	return 0;
 }
@@ -1552,36 +1822,47 @@ unsigned int tst_multiply_timeout(unsigned int timeout)
 	if (timeout < 1)
 		tst_brk(TBROK, "timeout must to be >= 1! (%d)", timeout);
 
+	if (tst_has_slow_kconfig())
+		timeout *= 4;
+
 	return timeout * timeout_mul;
 }
 
-static void set_timeout(void)
+static void set_overall_timeout(void)
 {
-	unsigned int timeout = DEFAULT_TIMEOUT;
+	unsigned int timeout = DEFAULT_TIMEOUT + tst_test->timeout;
 
-	if (results->max_runtime == TST_UNLIMITED_RUNTIME) {
-		tst_res(TINFO, "Timeout per run is disabled");
+	if (tst_test->timeout == TST_UNLIMITED_TIMEOUT) {
+		tst_res(TINFO, "Test timeout is not limited");
 		return;
 	}
 
-	if (results->max_runtime < 0) {
-		tst_brk(TBROK, "max_runtime must to be >= -1! (%d)",
-			results->max_runtime);
-	}
+	context->overall_time = tst_multiply_timeout(timeout) + context->runtime;
 
-	results->timeout = tst_multiply_timeout(timeout) + results->max_runtime;
-
-	tst_res(TINFO, "Timeout per run is %uh %02um %02us",
-		results->timeout/3600, (results->timeout%3600)/60,
-		results->timeout % 60);
+	tst_res(TINFO, "Overall timeout per run is %uh %02um %02us",
+		context->overall_time/3600, (context->overall_time%3600)/60,
+		context->overall_time % 60);
 }
 
-void tst_set_max_runtime(int max_runtime)
+void tst_set_timeout(int timeout)
 {
-	results->max_runtime = multiply_runtime(max_runtime);
-	tst_res(TINFO, "Updating max runtime to %uh %02um %02us",
-		max_runtime/3600, (max_runtime%3600)/60, max_runtime % 60);
-	set_timeout();
+	int timeout_adj = DEFAULT_TIMEOUT + timeout;
+
+	context->overall_time = tst_multiply_timeout(timeout_adj) + context->runtime;
+
+	tst_res(TINFO, "Overall timeout per run is %uh %02um %02us",
+		context->overall_time/3600, (context->overall_time%3600)/60,
+		context->overall_time % 60);
+
+	heartbeat();
+}
+
+void tst_set_runtime(int runtime)
+{
+	context->runtime = multiply_runtime(runtime);
+	tst_res(TINFO, "Updating runtime to %uh %02um %02us",
+		runtime/3600, (runtime%3600)/60, runtime % 60);
+	set_overall_timeout();
 	heartbeat();
 }
 
@@ -1592,7 +1873,9 @@ static int fork_testrun(void)
 	SAFE_SIGNAL(SIGINT, sigint_handler);
 	SAFE_SIGNAL(SIGTERM, sigint_handler);
 
-	alarm(results->timeout);
+	alarm(context->overall_time);
+
+	show_failure_hints = 1;
 
 	test_pid = fork();
 	if (test_pid < 0)
@@ -1622,7 +1905,10 @@ static int fork_testrun(void)
 		tst_res(TINFO, "Killed the leftover descendant processes");
 
 	if (WIFEXITED(status) && WEXITSTATUS(status))
-		return WEXITSTATUS(status);
+		tst_brk(TBROK, "Child returned with %i", WEXITSTATUS(status));
+
+	if (context->abort_flag)
+		return 0;
 
 	if (WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL) {
 		tst_res(TINFO, "If you are running on slow machine, "
@@ -1636,37 +1922,83 @@ static int fork_testrun(void)
 	return 0;
 }
 
+static struct tst_fs *lookup_fs_desc(const char *fs_type, int all_filesystems)
+{
+	struct tst_fs *fs = tst_test->filesystems;
+	static struct tst_fs empty;
+
+	if (!fs)
+		goto ret;
+
+	for (; fs->type; fs++) {
+
+		if (!fs->type)
+			continue;
+
+		if (!strcmp(fs_type, fs->type))
+			return fs;
+	}
+
+ret:
+	if (!all_filesystems)
+		return NULL;
+
+	if (!tst_test->filesystems || tst_test->filesystems[0].type)
+		return &empty;
+
+	return &tst_test->filesystems[0];
+}
+
+static int run_tcase_on_fs(struct tst_fs *fs, const char *fs_type)
+{
+	int ret;
+
+	tst_res(TINFO, "=== Testing on %s ===", fs_type);
+	tdev.fs_type = fs_type;
+
+	if (fs->mkfs_ver && tst_check_cmd(fs->mkfs_ver, 0))
+		return TCONF;
+
+	if (fs->min_kver && check_kver(fs->min_kver, 0))
+		return TCONF;
+
+	prepare_device(fs);
+
+	ret = fork_testrun();
+
+	if (context->mntpoint_mounted) {
+		tst_umount(tst_test->mntpoint);
+		context->mntpoint_mounted = 0;
+	}
+
+	return ret;
+}
+
 static int run_tcases_per_fs(void)
 {
 	int ret = 0;
 	unsigned int i;
+	bool found_valid_fs = false;
 	const char *const *filesystems = tst_get_supported_fs_types(tst_test->skip_filesystems);
 
 	if (!filesystems[0])
 		tst_brk(TCONF, "There are no supported filesystems");
 
 	for (i = 0; filesystems[i]; i++) {
+		struct tst_fs *fs = lookup_fs_desc(filesystems[i], tst_test->all_filesystems);
 
-		tst_res(TINFO, "=== Testing on %s ===", filesystems[i]);
-		tdev.fs_type = filesystems[i];
-
-		prepare_device();
-
-		ret = fork_testrun();
-
-		if (mntpoint_mounted) {
-			tst_umount(tst_test->mntpoint);
-			mntpoint_mounted = 0;
-		}
-
-		if (ret == TCONF)
+		if (!fs)
 			continue;
 
-		if (ret == 0)
-			continue;
+		found_valid_fs = true;
+		run_tcase_on_fs(fs, filesystems[i]);
 
-		do_exit(ret);
+		if (tst_atomic_load(&context->abort_flag))
+			do_exit(0);
 	}
+
+	if (!found_valid_fs)
+		tst_brk(TCONF, "No required filesystems are available");
 
 	return ret;
 }
@@ -1675,42 +2007,45 @@ unsigned int tst_variant;
 
 void tst_run_tcases(int argc, char *argv[], struct tst_test *self)
 {
-	int ret = 0;
 	unsigned int test_variants = 1;
+	struct utsname uval;
 
-	lib_pid = getpid();
 	tst_test = self;
 
 	do_setup(argc, argv);
-	tst_enable_oom_protection(lib_pid);
+	tst_enable_oom_protection(context->lib_pid);
 
 	SAFE_SIGNAL(SIGALRM, alarm_handler);
 	SAFE_SIGNAL(SIGUSR1, heartbeat_handler);
 
 	tst_res(TINFO, "LTP version: "LTP_VERSION);
 
-	if (tst_test->max_runtime)
-		results->max_runtime = multiply_runtime(tst_test->max_runtime);
+	uname(&uval);
+	tst_res(TINFO, "Tested kernel: %s %s %s", uval.release, uval.version, uval.machine);
 
-	set_timeout();
+	if (tst_test->min_runtime && !tst_test->runtime)
+		tst_test->runtime = tst_test->min_runtime;
+
+	if (tst_test->runtime)
+		context->runtime = multiply_runtime(tst_test->runtime);
+
+	set_overall_timeout();
 
 	if (tst_test->test_variants)
 		test_variants = tst_test->test_variants;
 
 	for (tst_variant = 0; tst_variant < test_variants; tst_variant++) {
-		if (tst_test->all_filesystems)
-			ret |= run_tcases_per_fs();
+		if (tst_test->all_filesystems || count_fs_descs() > 1)
+			run_tcases_per_fs();
 		else
-			ret |= fork_testrun();
+			fork_testrun();
 
-		if (ret & ~(TCONF))
-			goto exit;
+		if (tst_atomic_load(&context->abort_flag))
+			do_exit(0);
 	}
 
-exit:
-	do_exit(ret);
+	do_exit(0);
 }
-
 
 void tst_flush(void)
 {

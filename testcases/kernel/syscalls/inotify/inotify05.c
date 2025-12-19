@@ -2,14 +2,12 @@
 /*
  * Copyright (c) 2014 SUSE Linux.  All Rights Reserved.
  * Author: Jan Kara <jack@suse.cz>
- *
- * DESCRIPTION
- *     Check that inotify overflow event is properly generated
- *
- * ALGORITHM
- *     Generate enough events without reading them and check that overflow
- *     event is generated.
  */
+
+/*\
+ * Check that inotify overflow event is properly generated.
+ */
+
 #include "config.h"
 
 #include <stdio.h>
@@ -148,6 +146,7 @@ static void cleanup(void)
 }
 
 static struct tst_test test = {
+	.timeout = 1,
 	.needs_tmpdir = 1,
 	.setup = setup,
 	.cleanup = cleanup,

@@ -8,8 +8,6 @@
  */
 
 /*\
- * [Description]
- *
  * *Test 1*
  *
  * This is a regression test for the race condition between move_pages()
@@ -76,7 +74,7 @@
 
 #ifdef HAVE_NUMA_V2
 
-#define LOOPS	1000
+#define LOOPS	10000
 #define PATH_MEMINFO	"/proc/meminfo"
 #define PATH_NR_HUGEPAGES	"/proc/sys/vm/nr_hugepages"
 #define PATH_HUGEPAGES	"/sys/kernel/mm/hugepages/"
@@ -102,7 +100,7 @@ static void *addr;
 static int do_soft_offline(int tpgs)
 {
 	if (madvise(addr, tpgs * hpsz, MADV_SOFT_OFFLINE) == -1) {
-		if (errno != EINVAL && errno != EBUSY)
+		if (errno != EINVAL && errno != EBUSY && errno != ENOMEM)
 			tst_res(TFAIL | TERRNO, "madvise failed");
 		return errno;
 	}
@@ -153,6 +151,8 @@ static void do_test(unsigned int n)
 	void *ptr;
 	pid_t cpid = -1;
 	int status;
+
+	SAFE_FILE_PRINTF("/proc/sys/vm/compact_memory", "1");
 
 	addr = SAFE_MMAP(NULL, tcases[n].tpages * hpsz, PROT_READ | PROT_WRITE,
 		MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
@@ -269,6 +269,7 @@ static void setup(void)
 	pgsz = (int)get_page_size();
 	SAFE_FILE_LINES_SCANF(PATH_MEMINFO, "Hugepagesize: %d", &hpsz);
 
+	SAFE_FILE_PRINTF("/proc/sys/vm/drop_caches", "3");
 	SAFE_FILE_LINES_SCANF(PATH_MEMINFO, "MemFree: %ld", &memfree);
 	tst_res(TINFO, "Free RAM %ld kB", memfree);
 
@@ -339,7 +340,7 @@ static struct tst_test test = {
 	.cleanup = cleanup,
 	.test = do_test,
 	.tcnt = ARRAY_SIZE(tcases),
-	.max_runtime = 240,
+	.runtime = 240,
 	.tags = (const struct tst_tag[]) {
 		{"linux-git", "e66f17ff7177"},
 		{"linux-git", "c9d398fa2378"},

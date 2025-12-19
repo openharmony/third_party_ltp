@@ -293,7 +293,7 @@ ssize_t safe_read(const char *file, const int lineno, void (*cleanup_fn) (void),
 
 	rval = read(fildes, buf, nbyte);
 
-	if (rval == -1 || (len_strict && (size_t)rval != nbyte)) {
+	if (rval == -1) {
 		tst_brkm_(file, lineno, TBROK | TERRNO, cleanup_fn,
 			"read(%d,%p,%zu) failed, returned %zd", fildes, buf,
 			nbyte, rval);
@@ -301,6 +301,10 @@ ssize_t safe_read(const char *file, const int lineno, void (*cleanup_fn) (void),
 		tst_brkm_(file, lineno, TBROK | TERRNO, cleanup_fn,
 			"Invalid read(%d,%p,%zu) return value %zd", fildes,
 			buf, nbyte, rval);
+	} else if (len_strict && (size_t)rval != nbyte) {
+		tst_brkm_(file, lineno, TBROK, cleanup_fn,
+			  "Short read(%d,%p,%zu) returned only %zd",
+			  fildes, buf, nbyte, rval);
 	}
 
 	return rval;
@@ -547,6 +551,14 @@ ssize_t safe_write(const char *file, const int lineno, void (cleanup_fn) (void),
 			tst_brkm_(file, lineno, TBROK | TERRNO,
 				cleanup_fn, "write(%d,%p,%zu) failed",
 				fildes, buf, nbyte);
+			return rval;
+		}
+
+		if (rval < 0) {
+			tst_brkm_(file, lineno, TBROK, cleanup_fn,
+			          "invalid write() return value %zi",
+				  rval);
+			return rval;
 		}
 
 		if (len_strict == SAFE_WRITE_ANY)
@@ -554,7 +566,7 @@ ssize_t safe_write(const char *file, const int lineno, void (cleanup_fn) (void),
 
 		if (len_strict == SAFE_WRITE_ALL) {
 			if ((size_t)rval != nbyte)
-				tst_brkm_(file, lineno, TBROK | TERRNO,
+				tst_brkm_(file, lineno, TBROK,
 					cleanup_fn, "short write(%d,%p,%zu) "
 					"return value %zd",
 					fildes, buf, nbyte, rval);
@@ -763,6 +775,25 @@ int safe_fchown(const char *file, const int lineno, void (cleanup_fn)(void),
 	return rval;
 }
 
+int safe_lchown(const char *file, const int lineno, void (cleanup_fn)(void),
+			const char *path, uid_t owner, gid_t group)
+{
+	int rval;
+
+	rval = lchown(path, owner, group);
+
+	if (rval == -1) {
+		tst_brkm_(file, lineno, TBROK | TERRNO, cleanup_fn,
+			"lchown(%s,%d,%d) failed", path, owner, group);
+	} else if (rval) {
+		tst_brkm_(file, lineno, TBROK | TERRNO, cleanup_fn,
+			"Invalid lchown(%s,%d,%d) return value %d", path,
+			owner, group, rval);
+	}
+
+	return rval;
+}
+
 pid_t safe_wait(const char *file, const int lineno, void (cleanup_fn)(void),
                 int *status)
 {
@@ -895,10 +926,13 @@ static int possibly_fuse(const char *fs_type)
 int safe_mount(const char *file, const int lineno, void (*cleanup_fn)(void),
 	       const char *source, const char *target,
 	       const char *filesystemtype, unsigned long mountflags,
-	       const void *data)
+	       const void *data, int *is_fuse)
 {
 	int rval = -1;
 	char mpath[PATH_MAX];
+
+	if (is_fuse)
+		*is_fuse = 0;
 
 	if (realpath(target, mpath)) {
 		tst_resm_(file, lineno, TINFO,
@@ -913,7 +947,10 @@ int safe_mount(const char *file, const int lineno, void (*cleanup_fn)(void),
 	 * the kernel's NTFS driver doesn't have proper write support.
 	 */
 	if (!filesystemtype || strcmp(filesystemtype, "ntfs")) {
+		mode_t old_umask = umask(0);
+
 		rval = mount(source, target, filesystemtype, mountflags, data);
+		umask(old_umask);
 		if (!rval)
 			return 0;
 	}
@@ -927,14 +964,26 @@ int safe_mount(const char *file, const int lineno, void (*cleanup_fn)(void),
 	 */
 	if (possibly_fuse(filesystemtype)) {
 		char buf[1024];
+		const char *mount_ro = "";
+
+		if (mountflags & MS_RDONLY)
+			mount_ro = "-o ro";
+
+		if (mountflags & (~MS_RDONLY)) {
+			tst_brkm_(file, lineno, TBROK, cleanup_fn,
+			          "FUSE mount flag(s) not implemented!");
+		}
 
 		tst_resm_(file, lineno, TINFO, "Trying FUSE...");
-		snprintf(buf, sizeof(buf), "mount.%s '%s' '%s'",
-			filesystemtype, source, target);
+		snprintf(buf, sizeof(buf), "mount.%s %s '%s' '%s'",
+			filesystemtype, mount_ro, source, target);
 
 		rval = tst_system(buf);
-		if (WIFEXITED(rval) && WEXITSTATUS(rval) == 0)
+		if (WIFEXITED(rval) && WEXITSTATUS(rval) == 0) {
+			if (is_fuse)
+				*is_fuse = 1;
 			return 0;
+		}
 
 		tst_brkm_(file, lineno, TBROK, cleanup_fn,
 			"mount.%s failed with %i", filesystemtype, rval);

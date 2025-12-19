@@ -5,8 +5,6 @@
  */
 
 /*\
- * [Description]
- *
  * Some kernel versions after hugepage demand allocation was added used a
  * dubious heuristic to check if there was enough hugepage space available
  * for a given mapping.  The number of not-already-instantiated pages in
@@ -117,7 +115,7 @@ static void run_test(unsigned int test_type)
 static void setup(void)
 {
 	hpage_size = SAFE_READ_MEMINFO(MEMINFO_HPAGE_SIZE)*1024;
-	huge_fd = tst_creat_unlinked(MNTPOINT, 0);
+	huge_fd = tst_creat_unlinked(MNTPOINT, 0, 0600);
 }
 
 static void cleanup(void)

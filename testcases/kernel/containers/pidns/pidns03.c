@@ -1,12 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 Red Hat, Inc. All rights reserved.
  * Copyright (C) 2022 SUSE LLC Andrea Cervesato <andrea.cervesato@suse.com>
  */
 
 /*\
- * [Description]
- *
  * Clone a process with CLONE_NEWPID flag and check if procfs mounted folder
  * belongs to the new pid namespace by looking at /proc/self .
  */

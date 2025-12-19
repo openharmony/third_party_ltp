@@ -1,7 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*\
- *
- * [Description]
  *
  * Conversion of the first kself test in cgroup/test_memcontrol.c.
  * This test creates two nested cgroups with and without enabling the

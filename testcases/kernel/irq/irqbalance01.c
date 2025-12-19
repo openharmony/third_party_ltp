@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /* Copyright (c) 2021 SUSE LLC <rpalethorpe@suse.com> */
 /*\
- * [Description]
- *
  * Check that something (e.g. irqbalance daemon) is performing IRQ
  * load balancing.
  *
@@ -93,7 +91,7 @@ static void collect_irq_info(void)
 	char path[PATH_MAX];
 	size_t row, col, len;
 	long acc;
-	unsigned int cpu_total, bit;
+	unsigned int cpu_total, bit, row_parsed;
 
 	nr_cpus = 0;
 	nr_irqs = 0;
@@ -136,7 +134,7 @@ static void collect_irq_info(void)
 
 	c = first_row;
 	acc = -1;
-	row = col = 0;
+	row = col = row_parsed = 0;
 	/* Parse columns containing IRQ counts and IRQ IDs into acc. Ignore
 	 * everything else.
 	 */
@@ -154,7 +152,9 @@ static void collect_irq_info(void)
 			if (acc != -1)
 				tst_brk(TBROK, "Unexpected EOL");
 			col = 0;
-			row++;
+			if (row_parsed)
+				row++;
+			row_parsed = 0;
 			break;
 		case '0' ... '9':
 			if (acc == -1)
@@ -168,6 +168,7 @@ static void collect_irq_info(void)
 				tst_brk(TBROK, "Unexpected ':'");
 			irq_ids[row] = acc;
 			acc = -1;
+			row_parsed = 1;
 			break;
 		default:
 			acc = -1;
@@ -284,9 +285,18 @@ static void evidence_of_change(void)
 		}
 	}
 
-	tst_res(changed ? TPASS : TFAIL,
-		"Heuristic: Detected %zu irq-cpu pairs have been dissallowed",
-		changed);
+	if (changed) {
+		tst_res(TPASS, "IRQs assignments have changed %zu times",
+			changed);
+	} else {
+
+		tst_res(TFAIL, "IRQ balancing has not been detected");
+
+		tst_printf("Please, check that:\n"
+			   "- balancing service is not running\n"
+			   "- balancing service is running but rules didn't change\n"
+			   "- balancing rules have been changed, but CPUs didn't perform any interrupt");
+	}
 }
 
 static void setup(void)

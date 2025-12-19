@@ -17,14 +17,14 @@ ERRMSG_TPM="TPM hardware support not enabled in kernel or no TPM chip found"
 setup()
 {
 	local config="${KCONFIG_PATH:-/boot/config-$(uname -r)}"
-	local line tmp
+	local line
 
 	read line < $ASCII_MEASUREMENTS
-	if tmp=$(get_algorithm_digest "$line"); then
-		ALGORITHM=$(echo "$tmp" | cut -d'|' -f1)
-		DIGEST=$(echo "$tmp" | cut -d'|' -f2)
+	if get_algorithm_digest "$line" > tmp; then
+		ALGORITHM=$(cat tmp | cut -d'|' -f1)
+		DIGEST=$(cat tmp | cut -d'|' -f2)
 	else
-		tst_brk TBROK "failed to get algorithm/digest: $tmp"
+		tst_brk TBROK "failed to get algorithm/digest"
 	fi
 	tst_res TINFO "used algorithm: $ALGORITHM"
 
@@ -159,7 +159,8 @@ get_pcr10_aggregate()
 		$cmd > hash.txt 2>&1
 		ret=$?
 	elif [ $ret -ne 0 -a "$MISSING_EVMCTL" = 1 ]; then
-		tst_brk TFAIL "evmctl failed $msg"
+		tst_res TFAIL "evmctl failed $msg"
+		return
 	fi
 
 	[ $ret -ne 0 ] && tst_res TWARN "evmctl failed, trying to continue $msg"

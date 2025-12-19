@@ -7,8 +7,6 @@
  */
 
 /*\
- * [Description]
- *
  * This source file contains a test case which ensures that the fanotify API
  * returns an expected error code when provided an invalid initialization flag
  * alongside FAN_REPORT_PIDFD. Additionally, it checks that the operability with
@@ -50,7 +48,8 @@ static void do_setup(void)
 	 * An explicit check for FAN_REPORT_PIDFD is performed early on in the
 	 * test initialization as it's a prerequisite for all test cases.
 	 */
-	REQUIRE_FANOTIFY_INIT_FLAGS_SUPPORTED_BY_KERNEL(FAN_REPORT_PIDFD);
+	REQUIRE_FANOTIFY_INIT_FLAGS_SUPPORTED_ON_FS(FAN_REPORT_PIDFD,
+						    MOUNT_PATH);
 }
 
 static void do_test(unsigned int i)
